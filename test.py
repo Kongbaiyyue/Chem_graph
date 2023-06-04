@@ -208,13 +208,40 @@ def combine_templates_uspto():
 # mol = Chem.MolFromSmiles(smi)
 # smi_new = Chem.MolToSmiles(mol, canonical=True)
 # print(smi_new)
+# import torch.nn as nn
+import torch
+# norm = nn.LayerNorm(3)
+# batch_norm = nn.BatchNorm1d(3)
 
-ori_path = "data/template/retro_uspto_50_template_4.pickle"
-df = pd.read_pickle(ori_path)
-for i in range(df.shape[0]):
-    if df["set"][i] == "test" or df["set"][i] == "valid":
-        if df["products"][i] != "" or df["reactants"][i] != "":
-            print(df["products"][i])
-            print(df["reactants"][i])
-            print(df["products_mol"][i])
-            print(df["reactants_mol"][i])
+# x = torch.randn(4, 2, 3)
+# print(x)
+# y = norm(x)
+# print(y)
+# x = x.reshape((-1, 3))
+# z = batch_norm(x)
+# print(z)
+# print(torch.sum(z))
+
+from torch import nn, einsum
+from einops import rearrange, repeat
+
+# x = torch.randn(4, 2, 3)
+# # y = torch.randn(4, 2, 2, 3)
+# z = x.mean(dim=1)
+
+# # z = einsum('b i d, b i j d -> b i j', x, y)
+
+# print(z)
+# print(x)
+
+
+import rdkit
+import rdkit.Chem as Chem
+
+# smi = "Cc1nc(OCCCCN2CCN(c3cccc4ccc(F)cc34)CC2)nc2c1cccn2C.O"
+# mol = Chem.MolFromSmiles(smi)
+# print(mol)
+
+import pandas as pd
+df = pd.read_pickle("/public_data/oy/dataset/data/template/retro_uspto_50_template.pickle")
+print(df)

@@ -132,13 +132,38 @@ class ReactionDataset(_AbsDataset):
 
         return mol_str
 
+    def _del_bond_to_smiles(self, mol, other_mol=None):
+        bonds = mol.GetBonds()
+        bonds_num = len(bonds)
+        del_bond_index = random.randint(0, bonds_num-1)
+        rand_count = 0
+        mol_del = None
+        while mol_del is None:
+            mol_del = Chem.FragmentOnBonds(mol, [del_bond_index], addDummies=False)
+            mol_str = Chem.MolToSmiles(mol_del, canonical=False)
+            mol_del = Chem.MolFromSmiles(mol_str)
+            rand_count += 1
+
+            if rand_count > 10:
+                return Chem.MolToSmiles(mol, canonical=False)
+
+        # mol_str = Chem.MolToSmiles(mol_del, canonical=False)
+        if other_mol is not None:
+            other_mol_aug = self.aug([other_mol])[0] if aug else other_mol
+            other_mol_str = Chem.MolToSmiles(other_mol_aug, canonical=not aug)
+            return mol_str, other_mol_str
+
+        return mol_str
+
 
 class Uspto50(ReactionDataset):
     def __init__(self, data_path, aug_prob, type_token=False, forward=True):
         path = Path(data_path)
         df = pd.read_pickle(path)
-        reactants = df["reactants_mol"].tolist()
+        # reactants = df["reactants_mol"].tolist()
         products = df["products_mol"].tolist()
+        # reactants = df["reactants"].tolist()
+        reactants = df["products"].tolist()
         type_tokens = df["reaction_type"].tolist()
 
         super().__init__(reactants, products, items=type_tokens, transform=self._prepare_strings, aug_prob=aug_prob)
@@ -148,10 +173,12 @@ class Uspto50(ReactionDataset):
         self.train_idxs, self.val_idxs, self.test_idxs = self._save_idxs(df)
 
     def _prepare_strings(self, react, prod, type_token):
-        react_str = react
-        prod_str = prod
         # react_str = self._augment_to_smiles(react)
         # prod_str = self._augment_to_smiles(prod)
+        # react_str = self._augment_to_smiles(prod)
+        # prod_str = self._del_bond_to_smiles(prod)
+        react_str = react
+        prod_str = prod
 
         if self.forward:
             react_str = f"{str(type_token)}{react_str}" if self.type_token else react_str

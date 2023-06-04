@@ -228,7 +228,8 @@ def load_tokeniser(vocab_path, chem_token_start):
 def build_trainer(args):
     logger = TensorBoardLogger(args.log_dir, name=args.task)
     lr_monitor = LearningRateMonitor(logging_interval="step")
-    checkpoint_cb = ModelCheckpoint(monitor="val_molecular_accuracy", save_last=True)
+    # checkpoint_cb = ModelCheckpoint(monitor="val_molecular_accuracy", save_last=True)
+    checkpoint_cb = ModelCheckpoint(monitor="val_token_acc", save_last=True)
 
     plugins = None
     accelerator = None
@@ -247,6 +248,7 @@ def build_trainer(args):
         callbacks.append(intra_epoch_checkpoint)
         check_val = 1
 
+    args.gpus = [1]
     print(f"Num gpus: {args.gpus}")
     print(f"Accelerator: {accelerator}")
 

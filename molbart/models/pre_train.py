@@ -10,6 +10,11 @@ from molbart.models.util import (
     PreNormDecoderLayer,
     FuncLR
 )
+from molbart.models.graph_transformer_pytorch import (
+    GraphTransformer,
+    TextTransformer,
+    Attention
+)
 
 
 # ----------------------------------------------------------------------------------------------------------
@@ -103,8 +108,10 @@ class _AbsTransformerModel(pl.LightningModule):
 
         model_output = self.forward(batch)
         loss = self._calc_loss(batch, model_output)
+        token_acc = self._calc_token_acc(batch, model_output)
 
         self.log("train_loss", loss, on_step=True, logger=True, sync_dist=True)
+        self.log("train_token", token_acc, on_step=True, logger=True, sync_dist=True)
 
         return loss
 
@@ -116,22 +123,23 @@ class _AbsTransformerModel(pl.LightningModule):
 
         loss = self._calc_loss(batch, model_output)
         token_acc = self._calc_token_acc(batch, model_output)
-        perplexity = self._calc_perplexity(batch, model_output)
-        mol_strs, log_lhs = self.sample_molecules(batch, sampling_alg=self.val_sampling_alg)
-        metrics = self.sampler.calc_sampling_metrics(mol_strs, target_smiles)
+        # perplexity = self._calc_perplexity(batch, model_output)
+        # mol_strs, log_lhs = self.sample_molecules(batch, sampling_alg=self.val_sampling_alg)
+        # metrics = self.sampler.calc_sampling_metrics(mol_strs, target_smiles)
 
-        mol_acc = torch.tensor(metrics["accuracy"], device=loss.device)
-        invalid = torch.tensor(metrics["invalid"], device=loss.device)
+        # mol_acc = torch.tensor(metrics["accuracy"], device=loss.device)
+        # invalid = torch.tensor(metrics["invalid"], device=loss.device)
 
         # Log for prog bar only
-        self.log("mol_acc", mol_acc, prog_bar=True, logger=False, sync_dist=True)
+        # self.log("mol_acc", mol_acc, prog_bar=True, logger=False, sync_dist=True)
+        self.log("token_acc", token_acc, prog_bar=True, logger=False, sync_dist=True)
 
         val_outputs = {
             "val_loss": loss,
             "val_token_acc": token_acc,
-            "perplexity": perplexity,
-            "val_molecular_accuracy": mol_acc,
-            "val_invalid_smiles": invalid
+            # "perplexity": perplexity,
+            # "val_molecular_accuracy": mol_acc,
+            # "val_invalid_smiles": invalid
         }
         return val_outputs
 
@@ -211,7 +219,8 @@ class _AbsTransformerModel(pl.LightningModule):
     def _const_lr(self, step):
         if self.warm_up_steps is not None and step < self.warm_up_steps:
             return (self.lr / self.warm_up_steps) * step
-
+        
+        # return self.lr / (int(step / 79) * 40)
         return self.lr
 
     def _construct_input(self, token_ids, sentence_masks=None):
@@ -358,9 +367,42 @@ class BARTModel(_AbsTransformerModel):
         self.test_sampling_alg = "beam"
         self.num_beams = 10
 
-        enc_norm = nn.LayerNorm(d_model)
-        enc_layer = PreNormEncoderLayer(d_model, num_heads, d_feedforward, dropout, activation)
-        self.encoder = nn.TransformerEncoder(enc_layer, num_layers, norm=enc_norm)
+        # enc_norm = nn.LayerNorm(d_model)
+        # enc_layer = PreNormEncoderLayer(d_model, num_heads, d_feedforward, dropout, activation)
+        # self.encoder = nn.TransformerEncoder(enc_layer, num_layers, norm=enc_norm)
+        assert d_model % num_heads == 0
+        dim_head = d_model // num_heads
+        attention = []
+        for _ in range(num_layers):
+            attention.append(Attention(d_model, pos_emb=None, edge_dim=d_model, dim_head=dim_head, heads=num_heads))
+        
+        self.graph_enc = GraphTransformer( 
+            input_dim=9,
+            h_dim=d_model,
+            depth=3,
+            attention=attention,
+            edge_input_dim=9,
+            edge_h_dim=d_model,
+            # optional - if left out, edge dimensions is assumed to be the same as the node dimensions above
+            with_feedforwards=True,
+            # whether to add a feedforward after each attention layer, suggested by literature to be needed
+            gated_residual=True,  # to use the gated residual to prevent over-smoothing
+            rel_pos_emb=True
+        )
+        
+        self.text_enc = TextTransformer(
+            h_dim=d_model,
+            depth=num_layers // 2,
+            attention=attention[:num_layers // 2],
+            with_feedforwards=True,
+        )
+        
+        self.cross_enc = TextTransformer(
+            h_dim=d_model,
+            depth=num_layers // 2,
+            attention=attention[num_layers // 2:],
+            with_feedforwards=True,
+        )
 
         dec_norm = nn.LayerNorm(d_model)
         dec_layer = PreNormDecoderLayer(d_model, num_heads, d_feedforward, dropout, activation)
@@ -393,8 +435,7 @@ class BARTModel(_AbsTransformerModel):
 
         encoder_input = x["encoder_input"]
         decoder_input = x["decoder_input"]
-        # print("decoder_input", decoder_input[:, 0])
-        # print("encoder_input", encoder_input[:, 0])
+        
         encoder_pad_mask = x["encoder_pad_mask"].transpose(0, 1)
         decoder_pad_mask = x["decoder_pad_mask"].transpose(0, 1)
 
@@ -404,7 +445,23 @@ class BARTModel(_AbsTransformerModel):
         seq_len, _, _ = tuple(decoder_embs.size())
         tgt_mask = self._generate_square_subsequent_mask(seq_len, device=encoder_embs.device)
 
-        memory = self.encoder(encoder_embs, src_key_padding_mask=encoder_pad_mask)
+        # memory = self.encoder(encoder_embs, src_key_padding_mask=encoder_pad_mask)
+        # graph
+        atom = x["prods_atom"]
+        edge = x["prods_edge"]
+        length = x["lengths"]
+        adj = x["prods_adj"]
+        atom_masks = x["atom_masks"]
+        
+        text_embs = self.text_enc(encoder_embs.transpose(0, 1), mask=encoder_pad_mask)
+        node_embs, edge_embs = self.graph_enc(atom, edge, lengths=length, adj=adj)
+        
+        memory = self.cross_enc(
+            text_embs,
+            node=node_embs,
+            mask=atom_masks.clone()
+        ).transpose(0, 1)
+        
         model_output = self.decoder(
             decoder_embs,
             memory,
@@ -438,7 +495,24 @@ class BARTModel(_AbsTransformerModel):
         encoder_input = batch["encoder_input"]
         encoder_pad_mask = batch["encoder_pad_mask"].transpose(0, 1)
         encoder_embs = self._construct_input(encoder_input)
-        model_output = self.encoder(encoder_embs, src_key_padding_mask=encoder_pad_mask)
+        
+        # graph
+        atom = batch["prods_atom"]
+        edge = batch["prods_edge"]
+        length = batch["lengths"]
+        adj = batch["prods_adj"]
+        atom_masks = batch["atom_masks"]
+        
+        # model_output = self.encoder(encoder_embs, src_key_padding_mask=encoder_pad_mask)
+        text_embs = self.text_enc(encoder_embs.transpose(0, 1), mask=encoder_pad_mask)
+        node_embs, edge_embs = self.graph_enc(atom, edge, lengths=length, adj=adj)
+        
+        model_output = self.cross_enc(
+            text_embs,
+            node=node_embs,
+            mask=atom_masks.clone()
+        ).transpose(0, 1)
+        
         return model_output
 
     def decode(self, batch):
@@ -529,13 +603,25 @@ class BARTModel(_AbsTransformerModel):
 
         enc_input = batch_input["encoder_input"]
         enc_mask = batch_input["encoder_pad_mask"]
+        
+        prods_atom = batch_input["prods_atom"]
+        prods_adj = batch_input["prods_adj"]
+        prods_edge = batch_input["prods_edge"]
+        lengths = batch_input["lengths"]
+        atom_masks = batch_input["atom_masks"]
 
         # Freezing the weights reduces the amount of memory leakage in the transformer
         self.freeze()
 
         encode_input = {
             "encoder_input": enc_input,
-            "encoder_pad_mask": enc_mask
+            "encoder_pad_mask": enc_mask,
+            
+            "prods_atom": prods_atom,
+            "prods_adj": prods_adj,
+            "prods_edge": prods_edge,
+            "lengths": lengths,
+            "atom_masks": atom_masks
         }
         memory = self.encode(encode_input)
         mem_mask = enc_mask.clone()

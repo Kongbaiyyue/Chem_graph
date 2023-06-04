@@ -90,15 +90,20 @@ class Attention(nn.Module):
 
         self.to_out = nn.Linear(inner_dim, dim)
 
-    def forward(self, nodes, edges, mask=None, edge_mask=None):
+    def forward(self, nodes, edges=None, mask=None, edge_mask=None, cross_kv=None):
         h = self.heads
 
         q = self.to_q(nodes)
-        k, v = self.to_kv(nodes).chunk(2, dim = -1)
+        if cross_kv is None:
+            k, v = self.to_kv(nodes).chunk(2, dim = -1)
+        else:
+            k, v = self.to_kv(cross_kv).chunk(2, dim = -1)
 
-        e_kv = self.edges_to_kv(edges)
+        if edges is not None:
+            e_kv = self.edges_to_kv(edges)
+            e_kv = rearrange(e_kv, 'b ... (h d) -> (b h) ... d', h = h)
 
-        q, k, v, e_kv = map(lambda t: rearrange(t, 'b ... (h d) -> (b h) ... d', h = h), (q, k, v, e_kv))
+        q, k, v = map(lambda t: rearrange(t, 'b ... (h d) -> (b h) ... d', h = h), (q, k, v))
 
         if exists(self.pos_emb):
             freqs = self.pos_emb(torch.arange(nodes.shape[1], device = nodes.device))
@@ -108,23 +113,33 @@ class Attention(nn.Module):
 
         if exists(edge_mask):
             pass
+        
+        if edges is not None:
+            k, v = map(lambda t: rearrange(t, 'b j d -> b () j d '), (k, v))
+            ek, ev = e_kv, e_kv
+            k = k + ek
+            v = v + ev
 
-        ek, ev = e_kv, e_kv
-
-        k, v = map(lambda t: rearrange(t, 'b j d -> b () j d '), (k, v))
-        k = k + ek
-        v = v + ev
-
-        sim = einsum('b i d, b i j d -> b i j', q, k) * self.scale
+        if edges is not None:
+            sim = einsum('b i d, b i j d -> b i j', q, k) * self.scale
+        else:
+            sim = einsum('b i d, b j d -> b i j', q, k) * self.scale
 
         if exists(mask):
             # mask = rearrange(mask, 'b i -> b i ()') & rearrange(mask, 'b j -> b () j')
-            mask = repeat(mask, 'b i j -> (b h) i j', h=h)
+            if edges is not None:
+                mask = repeat(mask, 'b i j -> (b h) i j', h=h)
+            else:
+                mask = rearrange(mask, 'b d -> b () d')
+                mask = repeat(mask, 'b i j -> (b h) i j', h=h)   # 为什么要repeat？
             max_neg_value = -torch.finfo(sim.dtype).max
             sim.masked_fill_(~mask, max_neg_value)
 
         attn = sim.softmax(dim=-1)
-        out = einsum('b i j, b i j d -> b i d', attn, v)
+        if edges is not None:
+            out = einsum('b i j, b i j d -> b i d', attn, v)
+        else:
+            out = einsum('b i j, b j d -> b i d', attn, v)
         out = rearrange(out, '(b h) n d -> b n (h d)', h=h)
         return self.to_out(out)
 
@@ -145,6 +160,7 @@ class GraphTransformer(nn.Module):
         input_dim,
         h_dim,
         depth,
+        attention,
         dim_head=64,
         edge_input_dim=None,
         edge_h_dim=None,
@@ -152,7 +168,7 @@ class GraphTransformer(nn.Module):
         gated_residual=True,
         with_feedforwards = False,
         norm_edges = False,
-        rel_pos_emb = False
+        rel_pos_emb = False,
     ):
         super().__init__()
         self.layers = List([])
@@ -162,17 +178,16 @@ class GraphTransformer(nn.Module):
         self.e_emb = nn.Linear(edge_input_dim, edge_h_dim)
         self.norm_edges = nn.LayerNorm(edge_h_dim) if norm_edges else nn.Identity()
 
-        assert h_dim % heads == 0
-        dim_head = h_dim // heads
+        # assert h_dim % heads == 0
+        # dim_head = h_dim // heads
 
-        pos_emb = RotaryEmbedding(dim_head) if rel_pos_emb else None
+        # pos_emb = RotaryEmbedding(dim_head) if rel_pos_emb else None
 
-        self.gen = nn.Linear(h_dim, 88)
-
-        for _ in range(depth):
+        for i in range(depth):
             self.layers.append(List([
                 List([
-                    PreNorm(h_dim, Attention(h_dim, pos_emb=pos_emb, edge_dim=edge_h_dim, dim_head=dim_head, heads=heads)),
+                    # PreNorm(h_dim, Attention(h_dim, pos_emb=pos_emb, edge_dim=edge_h_dim, dim_head=dim_head, heads=heads)),
+                    PreNorm(h_dim, attention[i]),
                     GatedResidual(h_dim)
                 ]),
                 List([
@@ -181,10 +196,11 @@ class GraphTransformer(nn.Module):
                 ]) if with_feedforwards else None
             ]))
 
-    def forward(self, nodes, edges, lengths=None, adj=None):
+    def forward(self, nodes, edges=None, lengths=None, adj=None):
         nodes = self.n_emb(nodes)
-        edges = self.e_emb(edges)
-        edges = self.norm_edges(edges)
+        if edges is not None:
+            edges = self.e_emb(edges)
+            edges = self.norm_edges(edges)
 
         mask = None
         if isinstance(adj, torch.Tensor):
@@ -202,6 +218,43 @@ class GraphTransformer(nn.Module):
                 nodes = ff_residual(ff(nodes), nodes)
 
         return nodes, edges
+
+
+class TextTransformer(nn.Module):
+    def __init__(
+        self,
+        h_dim,
+        depth,
+        attention,
+        with_feedforwards = False,
+    ):
+        super().__init__()
+        self.layers = List([])
+
+        for i in range(depth):
+            self.layers.append(List([
+                List([
+                    PreNorm(h_dim, attention[i]),
+                    GatedResidual(h_dim)
+                ]),
+                List([
+                    PreNorm(h_dim, FeedForward(h_dim)),
+                    GatedResidual(h_dim)
+                ]) if with_feedforwards else None
+            ]))
+
+    def forward(self, text, node=None, mask = None):
+        
+        for attn_block, ff_block in self.layers:
+            attn, attn_residual = attn_block
+            text = attn_residual(attn(text, edges=None, mask=mask, cross_kv=node), text)
+
+            if exists(ff_block):
+                ff, ff_residual = ff_block
+                text = ff_residual(ff(text), text)
+
+        return text
+    
 
 
 if __name__ == '__main__':

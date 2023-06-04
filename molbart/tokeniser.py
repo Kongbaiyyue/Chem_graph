@@ -411,3 +411,60 @@ class MolEncTokeniser:
         padded = [seq + ([pad_token] * (pad_length - len(seq))) for seq in seqs]
         masks = [([0] * len(seq)) + ([1] * (pad_length - len(seq))) for seq in seqs]
         return padded, masks
+
+    @staticmethod
+    def _pad_adj(adjs, pad_token):
+        pad_col_length = max([len(seq[0]) for seq in adjs])
+        pad_row_length = max([len(seq) for seq in adjs])
+        padded = []
+        for seq in adjs:
+            adj = []
+            for adj_node in seq:
+                adj.append(adj_node + ([pad_token] * (pad_col_length - len(adj_node))))
+            for i in range(pad_row_length - len(seq)):
+                adj.append([pad_token] * pad_col_length)
+            padded.append(adj)
+
+        return padded
+
+    @staticmethod
+    def _pad_edge(edges, pad_token):
+        pad_length = max([len(seq[0]) for seq in edges])
+        padded = []
+        for seq in edges:
+            edge = []
+            for edge_node in seq:
+                edge.append(edge_node + ([[pad_token] * 9] * (pad_length - len(edge_node))))
+            for i in range(pad_length - len(seq[0])):
+                edge.append([[pad_token] * 9] * pad_length)
+            padded.append(edge)
+
+        return padded
+    
+    @staticmethod
+    def _pad_atom(atoms, pad_token):
+        pad_length = max([len(seq) for seq in atoms])
+        padded = []
+        masks = []
+        for atom in atoms:
+            atom_len = len(atom)
+            masks.append(([0] * atom_len) + ([1] * (pad_length - atom_len)))
+            for i in range(pad_length - atom_len):
+                atom.append([pad_token] * 9)
+            padded.append(atom)
+
+        return padded, masks
+    
+    @staticmethod
+    def _pad_a2m(seqs, pad_token, pad_length):
+        padded = [seq + ([pad_token] * (pad_length - len(seq))) for seq in seqs]
+        masks = [([0] * len(seq)) + ([1] * (pad_length - len(seq))) for seq in seqs]
+        return padded, masks
+
+    def convert_types_to_ids(self, token_data):
+        ids_list = []
+
+        ids = [self.vocab.get(token, self.unk_id) for token in token_data]
+        ids_list.append(ids)
+
+        return ids_list

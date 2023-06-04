@@ -12,6 +12,10 @@ from molbart.tokeniser import MolEncTokeniser
 from molbart.data.util import TokenSampler
 from molbart.data.datasets import MoleculeDataset, ReactionDataset
 
+from molbart.data.smiles import (
+    get_graph_features_from_smi
+)
+
 
 class _AbsDataModule(pl.LightningDataModule):
     def __init__(
@@ -411,6 +415,35 @@ class FineTuneReactionDataModule(_AbsDataModule):
         prods_token_ids = torch.tensor(prods_token_ids).transpose(0, 1)
         prods_pad_mask = torch.tensor(prods_mask, dtype=torch.bool).transpose(0, 1)
 
+        prods_adj = []
+        atom_features = []
+        edges = []
+        lengths = []
+        smile2nodes = []
+        
+        for i, smi in enumerate(prods_smiles):
+            # smi = smi.split(">", maxsplit=1)[1]
+            # atom_feature, edge, adj, smile2node = get_graph_features_from_smi(smi)
+            atom_feature, edge, adj = get_graph_features_from_smi(smi)
+            prods_adj.append(adj)
+            atom_features.append(atom_feature)
+            edges.append(edge)
+            lengths.append(len(atom_feature))
+            # smile2nodes.append(smile2node)
+        
+        prods_adj = self.tokeniser._pad_adj(prods_adj, 0)
+        prods_atom, atom_masks = self.tokeniser._pad_atom(atom_features, 0)
+        prods_edge = self.tokeniser._pad_edge(edges, 0)
+        # prods_smile2nodes = self.tokeniser._pad_adj(smile2nodes, 0)
+
+        lengths = torch.tensor(lengths)
+        prods_adj = torch.tensor(prods_adj, dtype=torch.float32)
+        prods_atom = torch.tensor(prods_atom, dtype=torch.float32)
+        prods_edge = torch.tensor(prods_edge, dtype=torch.float32)
+        atom_masks = torch.tensor(atom_masks, dtype=torch.bool)
+        # prods_smile2nodes = torch.tensor(prods_smile2nodes, dtype=torch.float32)
+
+        
         if self.forward_pred:
             collate_output = {
                 "encoder_input": reacts_token_ids,
@@ -429,7 +462,14 @@ class FineTuneReactionDataModule(_AbsDataModule):
                 "decoder_pad_mask": reacts_pad_mask[:-1, :],
                 "target": reacts_token_ids.clone()[1:, :],
                 "target_mask": reacts_pad_mask.clone()[1:, :],
-                "target_smiles": reacts_smiles
+                "target_smiles": reacts_smiles,
+                
+                "prods_adj": prods_adj,
+                "prods_atom": prods_atom,
+                "prods_edge": prods_edge,
+                "lengths": lengths,
+                "atom_masks": atom_masks,
+                # "prods_smile2nodes": prods_smile2nodes.permute(0, 2, 1),
             }
 
         return collate_output
