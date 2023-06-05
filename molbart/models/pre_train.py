@@ -123,15 +123,15 @@ class _AbsTransformerModel(pl.LightningModule):
 
         loss = self._calc_loss(batch, model_output)
         token_acc = self._calc_token_acc(batch, model_output)
-        # perplexity = self._calc_perplexity(batch, model_output)
-        # mol_strs, log_lhs = self.sample_molecules(batch, sampling_alg=self.val_sampling_alg)
-        # metrics = self.sampler.calc_sampling_metrics(mol_strs, target_smiles)
+        perplexity = self._calc_perplexity(batch, model_output)
+        mol_strs, log_lhs = self.sample_molecules(batch, sampling_alg=self.val_sampling_alg)
+        metrics = self.sampler.calc_sampling_metrics(mol_strs, target_smiles)
 
-        # mol_acc = torch.tensor(metrics["accuracy"], device=loss.device)
-        # invalid = torch.tensor(metrics["invalid"], device=loss.device)
+        mol_acc = torch.tensor(metrics["accuracy"], device=loss.device)
+        invalid = torch.tensor(metrics["invalid"], device=loss.device)
 
         # Log for prog bar only
-        # self.log("mol_acc", mol_acc, prog_bar=True, logger=False, sync_dist=True)
+        self.log("mol_acc", mol_acc, prog_bar=True, logger=False, sync_dist=True)
         self.log("token_acc", token_acc, prog_bar=True, logger=False, sync_dist=True)
 
         val_outputs = {
