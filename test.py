@@ -244,4 +244,4 @@ import rdkit.Chem as Chem
 
 import pandas as pd
 df = pd.read_pickle("/public_data/oy/dataset/data/template/retro_uspto_50_template.pickle")
-print(df)
+df.to_csv("/public_data/oy/dataset/data/template/retro_uspto_50_template.csv")
