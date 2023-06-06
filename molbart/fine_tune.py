@@ -3,7 +3,8 @@ import argparse
 
 import molbart.util as util
 from molbart.decoder import DecodeSampler
-from molbart.models.pre_train import BARTModel, UnifiedModel
+from molbart.models.pre_train import BARTModel, UnifiedModel, PromptModel
+from pytorch_lightning.utilities.cloud_io import load as pl_load
 
 
 # Default training hyperparameters
@@ -92,18 +93,63 @@ def load_model(args, sampler, vocab_size, total_steps, pad_token_idx):
         model = load_rand_model(args, extra_args, sampler, vocab_size, total_steps, pad_token_idx)
     else:
         if args.model_type == "bart":
-            model = BARTModel.load_from_checkpoint(
-                args.model_path,
-                decode_sampler=sampler,
-                pad_token_idx=pad_token_idx,
-                vocab_size=vocab_size,
-                num_steps=total_steps,
-                lr=args.lr,
-                weight_decay=args.weight_decay,
+            # model = BARTModel.load_from_checkpoint(
+            #     args.model_path,
+            #     decode_sampler=sampler,
+            #     pad_token_idx=pad_token_idx,
+            #     vocab_size=vocab_size,
+            #     num_steps=total_steps,
+            #     lr=args.lr,
+            #     weight_decay=args.weight_decay,
+            #     schedule=args.schedule,
+            #     warm_up_steps=args.warm_up_steps,
+            #     **extra_args
+            # )
+            checkpoint = pl_load(args.model_path, map_location=lambda storage, loc: storage)
+            print(args.num_layers)
+            model = BARTModel(
+                        sampler,
+                        pad_token_idx,
+                        vocab_size,
+                        args.d_model,
+                        args.num_layers,
+                        args.num_heads,
+                        args.d_feedforward,
+                        args.lr,
+                        DEFAULT_WEIGHT_DECAY,
+                        util.DEFAULT_ACTIVATION,
+                        total_steps,
+                        util.DEFAULT_MAX_SEQ_LEN,
+                        schedule=args.schedule,
+                        dropout=util.DEFAULT_DROPOUT,
+                        warm_up_steps=args.warm_up_steps,
+                        **extra_args
+                    )
+            model.load_state_dict(checkpoint["state_dict"], strict=True)
+            
+            checkpoint = pl_load(args.prompt_path, map_location=lambda storage, loc: storage)
+            prompt_model = PromptModel(
+                sampler,
+                pad_token_idx,
+                vocab_size,
+                args.d_model,
+                args.num_layers,
+                args.num_heads,
+                args.d_feedforward,
+                args.lr,
+                DEFAULT_WEIGHT_DECAY,
+                util.DEFAULT_ACTIVATION,
+                total_steps,
+                util.DEFAULT_MAX_SEQ_LEN,
                 schedule=args.schedule,
+                dropout=util.DEFAULT_DROPOUT,
                 warm_up_steps=args.warm_up_steps,
                 **extra_args
             )
+            prompt_model.load_state_dict(checkpoint["state_dict"], strict=True)
+            model.prompt_model = prompt_model
+
+
         elif args.model_type == "unified":
             model = UnifiedModel.load_from_checkpoint(
                 args.model_path,
@@ -210,6 +256,8 @@ if __name__ == "__main__":
     parser.add_argument("--num_layers", type=int, default=util.DEFAULT_NUM_LAYERS)
     parser.add_argument("--num_heads", type=int, default=util.DEFAULT_NUM_HEADS)
     parser.add_argument("--d_feedforward", type=int, default=util.DEFAULT_D_FEEDFORWARD)
+
+    parser.add_argument("--prompt_path", type=str, default="")
 
     args = parser.parse_args()
     main(args)

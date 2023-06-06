@@ -12,12 +12,17 @@ from molbart.models.util import (
     PreNormCrossLayer,
     PreNormCross
 )
+
 from molbart.models.graph_transformer_pytorch import (
     GraphTransformer,
     TextTransformer,
     Attention,
 )
 
+from molbart.models.encoder import (
+    MyPreNormEncoderLayer,
+    MyTransformerEncoder
+)
 
 # ----------------------------------------------------------------------------------------------------------
 # -------------------------------------------- Abstract Models ---------------------------------------------
@@ -132,8 +137,16 @@ class _AbsTransformerModel(pl.LightningModule):
         mol_acc = torch.tensor(metrics["accuracy"], device=loss.device)
         invalid = torch.tensor(metrics["invalid"], device=loss.device)
 
+        total = len(mol_strs)
+        acc_str = 0
+        for i in range(len(mol_strs)):
+            if mol_strs[i] == target_smiles[i]:
+                acc_str += 1
+        acc_str = acc_str / total
+        
         # Log for prog bar only
         self.log("mol_acc", mol_acc, prog_bar=True, logger=False, sync_dist=True)
+        self.log("acc_str", acc_str, prog_bar=True, logger=False, sync_dist=True)
         self.log("token_acc", token_acc, prog_bar=True, logger=False, sync_dist=True)
 
         val_outputs = {
@@ -370,6 +383,291 @@ class BARTModel(_AbsTransformerModel):
         self.num_beams = 10
 
         enc_norm = nn.LayerNorm(d_model)
+        # enc_layer = PreNormEncoderLayer(d_model, num_heads, d_feedforward, dropout, activation)
+        # self.encoder = nn.TransformerEncoder(enc_layer, num_layers, norm=enc_norm)
+        enc_layer = MyPreNormEncoderLayer(d_model, num_heads, d_feedforward, dropout, activation)
+        self.encoder = MyTransformerEncoder(enc_layer, num_layers, norm=enc_norm)
+
+        dec_norm = nn.LayerNorm(d_model)
+        dec_layer = PreNormDecoderLayer(d_model, num_heads, d_feedforward, dropout, activation)
+        self.decoder = nn.TransformerDecoder(dec_layer, num_layers, norm=dec_norm)
+
+        self.token_fc = nn.Linear(d_model, vocab_size)
+        self.loss_fn = nn.CrossEntropyLoss(reduction="none", ignore_index=pad_token_idx)
+        self.log_softmax = nn.LogSoftmax(dim=2)
+
+        self._init_params()
+
+    def forward(self, x):
+        """ Apply SMILES strings to model
+
+        The dictionary returned will be passed to other functions, so its contents are fairly flexible,
+        except that it must contain the key "token_output" which is the output of the model 
+        (possibly after any fully connected layers) for each token.
+
+        Arg:
+            x (dict {
+                "encoder_input": tensor of token_ids of shape (src_len, batch_size),
+                "encoder_pad_mask": bool tensor of padded elems of shape (src_len, batch_size),
+                "decoder_input": tensor of decoder token_ids of shape (tgt_len, batch_size)
+                "decoder_pad_mask": bool tensor of decoder padding mask of shape (tgt_len, batch_size)
+            }):
+
+        Returns:
+            Output from model (dict containing key "token_output" and "model_output")
+        """
+
+        encoder_input = x["encoder_input"]
+        decoder_input = x["decoder_input"]
+        # print("decoder_input", decoder_input[:, 0])
+        # print("encoder_input", encoder_input[:, 0])
+        with torch.no_grad():
+            # prompt_tokens, prompt_pad_mask = self.prompt_model.sample_molecules(x)
+            prompt = self.prompt_model(x)["memory"]
+        
+        encoder_pad_mask = x["encoder_pad_mask"].transpose(0, 1)
+        decoder_pad_mask = x["decoder_pad_mask"].transpose(0, 1)
+        # print("prompt_tokens", prompt_tokens.shape)
+        # print("encoder_input", encoder_input.shape)
+        # print("encoder_pad_mask", encoder_pad_mask.shape)
+        # print("prompt_pad_mask", prompt_pad_mask.shape)
+        
+        #encoder_input = torch.cat((prompt_tokens, encoder_input), dim=0)
+        #encoder_pad_mask = torch.cat((prompt_pad_mask, encoder_pad_mask), dim=1)
+        # encoder_input = prompt_tokens
+        # encoder_pad_mask = prompt_pad_mask
+
+        encoder_embs = self._construct_input(encoder_input)
+        decoder_embs = self._construct_input(decoder_input)
+
+        seq_len, _, _ = tuple(decoder_embs.size())
+        tgt_mask = self._generate_square_subsequent_mask(seq_len, device=encoder_embs.device)
+
+        memory = self.encoder(encoder_embs, src_key_padding_mask=encoder_pad_mask, prompt_embeds=prompt)
+        model_output = self.decoder(
+            decoder_embs,
+            memory,
+            tgt_mask=tgt_mask,
+            tgt_key_padding_mask=decoder_pad_mask,
+            memory_key_padding_mask=encoder_pad_mask.clone()
+        )
+
+        token_output = self.token_fc(model_output)
+
+        output = {
+            "model_output": model_output,
+            "token_output": token_output
+        }
+
+        return output
+
+    def encode(self, batch):
+        """ Construct the memory embedding for an encoder input
+
+        Args:
+            batch (dict {
+                "encoder_input": tensor of token_ids of shape (src_len, batch_size),
+                "encoder_pad_mask": bool tensor of padded elems of shape (src_len, batch_size),
+            })
+
+        Returns:
+            encoder memory (Tensor of shape (seq_len, batch_size, d_model))
+        """
+
+        encoder_input = batch["encoder_input"]
+        encoder_pad_mask = batch["encoder_pad_mask"].transpose(0, 1)
+        prompt = batch["prompt"]
+        encoder_embs = self._construct_input(encoder_input)
+        model_output = self.encoder(encoder_embs, src_key_padding_mask=encoder_pad_mask, prompt_embeds=prompt)
+        return model_output
+
+    def decode(self, batch):
+        """ Construct an output from a given decoder input
+
+        Args:
+            batch (dict {
+                "decoder_input": tensor of decoder token_ids of shape (tgt_len, batch_size)
+                "decoder_pad_mask": bool tensor of decoder padding mask of shape (tgt_len, batch_size)
+                "memory_input": tensor from encoded input of shape (src_len, batch_size, d_model)
+                "memory_pad_mask": bool tensor of memory padding mask of shape (src_len, batch_size)
+            })
+        """
+
+        decoder_input = batch["decoder_input"]
+        decoder_pad_mask = batch["decoder_pad_mask"].transpose(0, 1)
+        memory_input = batch["memory_input"]
+        memory_pad_mask = batch["memory_pad_mask"].transpose(0, 1)
+
+        decoder_embs = self._construct_input(decoder_input)
+
+        seq_len, _, _ = tuple(decoder_embs.size())
+        tgt_mask = self._generate_square_subsequent_mask(seq_len, device=decoder_embs.device)
+
+        model_output = self.decoder(
+            decoder_embs, 
+            memory_input,
+            tgt_key_padding_mask=decoder_pad_mask,
+            memory_key_padding_mask=memory_pad_mask,
+            tgt_mask=tgt_mask
+        )
+        token_output = self.token_fc(model_output)
+        token_probs = self.log_softmax(token_output)
+        return token_probs
+
+    def _calc_loss(self, batch_input, model_output):
+        """ Calculate the loss for the model
+
+        Args:
+            batch_input (dict): Input given to model,
+            model_output (dict): Output from model
+
+        Returns:
+            loss (singleton tensor),
+        """
+
+        tokens = batch_input["target"]
+        pad_mask = batch_input["target_mask"]
+        token_output = model_output["token_output"]
+
+        token_mask_loss = self._calc_mask_loss(token_output, tokens, pad_mask)
+
+        return token_mask_loss
+
+    def _calc_mask_loss(self, token_output, target, target_mask):
+        """ Calculate the loss for the token prediction task
+
+        Args:
+            token_output (Tensor of shape (seq_len, batch_size, vocab_size)): token output from transformer
+            target (Tensor of shape (seq_len, batch_size)): Original (unmasked) SMILES token ids from the tokeniser
+            target_mask (Tensor of shape (seq_len, batch_size)): Pad mask for target tokens
+
+        Output:
+            loss (singleton Tensor): Loss computed using cross-entropy,
+        """
+
+        seq_len, batch_size = tuple(target.size())
+
+        token_pred = token_output.reshape((seq_len * batch_size, -1)).float()
+        loss = self.loss_fn(token_pred, target.reshape(-1)).reshape((seq_len, batch_size))
+
+        inv_target_mask = ~(target_mask > 0)
+        num_tokens = inv_target_mask.sum()
+        loss = loss.sum() / num_tokens
+
+        return loss
+
+    def sample_molecules(self, batch_input, sampling_alg="greedy"):
+        """ Sample molecules from the model
+
+        Args:
+            batch_input (dict): Input given to model
+            sampling_alg (str): Algorithm to use to sample SMILES strings from model
+
+        Returns:
+            ([[str]], [[float]]): Tuple of molecule SMILES strings and log lhs (outer dimension is batch)
+        """
+
+        enc_input = batch_input["encoder_input"]
+        enc_mask = batch_input["encoder_pad_mask"]
+
+        # Freezing the weights reduces the amount of memory leakage in the transformer
+        self.freeze()
+        
+        # prompt_tokens, prompt_pad_mask = self.prompt_model.sample_molecules(batch_input)
+        # #enc_input = torch.cat((prompt_tokens, enc_input), dim=0)
+        # #enc_mask = torch.cat((prompt_pad_mask.transpose(0, 1), enc_mask), dim=0)
+        # enc_input = prompt_tokens
+        # enc_mask = prompt_pad_mask.transpose(0, 1)
+
+        prompt = self.prompt_model(batch_input)["memory"]
+
+        encode_input = {
+            "encoder_input": enc_input,
+            "encoder_pad_mask": enc_mask,
+            "prompt": prompt,
+        }
+        memory = self.encode(encode_input)
+        mem_mask = enc_mask.clone()
+
+        _, batch_size, _ = tuple(memory.size())
+
+        decode_fn = partial(self._decode_fn, memory=memory, mem_pad_mask=mem_mask)
+
+        if sampling_alg == "greedy":
+            mol_strs, log_lhs = self.sampler.greedy_decode(decode_fn, batch_size, memory.device)
+
+        elif sampling_alg == "beam":
+            mol_strs, log_lhs = self.sampler.beam_decode(decode_fn, batch_size, memory.device, k=self.num_beams)
+
+        else:
+            raise ValueError(f"Unknown sampling algorithm {sampling_alg}")
+
+        # Must remember to unfreeze!
+        self.unfreeze()
+
+        return mol_strs, log_lhs
+
+    def _decode_fn(self, token_ids, pad_mask, memory, mem_pad_mask):
+        decode_input = {
+            "decoder_input": token_ids,
+            "decoder_pad_mask": pad_mask,
+            "memory_input": memory,
+            "memory_pad_mask": mem_pad_mask
+        }
+        model_output = self.decode(decode_input)
+        return model_output
+    
+
+
+# ----------------------------------------------------------------------------------------------------------
+# -------------------------------------------- Prompt Models --------------------------------------------
+# ----------------------------------------------------------------------------------------------------------
+
+
+class PromptModel(_AbsTransformerModel):
+    def __init__(
+        self,
+        decode_sampler,
+        pad_token_idx,
+        vocab_size, 
+        d_model,
+        num_layers, 
+        num_heads,
+        d_feedforward,
+        lr,
+        weight_decay,
+        activation,
+        num_steps,
+        max_seq_len,
+        schedule="cycle",
+        warm_up_steps=None,
+        dropout=0.1,
+        **kwargs
+    ):
+        super().__init__(
+            pad_token_idx,
+            vocab_size, 
+            d_model,
+            num_layers, 
+            num_heads,
+            d_feedforward,
+            lr,
+            weight_decay,
+            activation,
+            num_steps,
+            max_seq_len,
+            schedule,
+            warm_up_steps,
+            dropout,
+            **kwargs
+        )
+
+        self.sampler = decode_sampler
+        self.val_sampling_alg = "greedy"
+        self.test_sampling_alg = "beam"
+        self.num_beams = 10
+
+        enc_norm = nn.LayerNorm(d_model)
         enc_layer = PreNormEncoderLayer(d_model, num_heads, d_feedforward, dropout, activation)
         self.encoder = nn.TransformerEncoder(enc_layer, num_layers // 2, norm=enc_norm)
         assert d_model % num_heads == 0
@@ -487,7 +785,8 @@ class BARTModel(_AbsTransformerModel):
 
         output = {
             "model_output": model_output,
-            "token_output": token_output
+            "token_output": token_output,
+            "memory": memory
         }
 
         return output

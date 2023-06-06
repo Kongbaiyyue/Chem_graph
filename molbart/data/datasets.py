@@ -160,7 +160,7 @@ class Uspto50(ReactionDataset):
     def __init__(self, data_path, aug_prob, type_token=False, forward=True):
         path = Path(data_path)
         df = pd.read_pickle(path)
-        #reactants = df["reactants_mol"].tolist()
+        # reactants = df["reactants_mol"].tolist()
         products = df["products_mol"].tolist()
         # reactants = df["reactants"].tolist()
         reactants = df["products"].tolist()
@@ -180,6 +180,9 @@ class Uspto50(ReactionDataset):
         # prod_str = self._del_bond_to_smiles(prod)
         react_str = react
         # prod_str = prod
+
+        # react = Chem.MolFromSmiles(react)
+        # react_str = self._augment_to_smiles(react)
 
         if self.forward:
             react_str = f"{str(type_token)}{react_str}" if self.type_token else react_str
