@@ -160,10 +160,10 @@ class Uspto50(ReactionDataset):
     def __init__(self, data_path, aug_prob, type_token=False, forward=True):
         path = Path(data_path)
         df = pd.read_pickle(path)
-        reactants = df["reactants_mol"].tolist()
+        # reactants = df["reactants_mol"].tolist()
         products = df["products_mol"].tolist()
         # reactants = df["reactants"].tolist()
-        # reactants = df["products"].tolist()
+        reactants = df["products"].tolist()
         type_tokens = df["reaction_type"].tolist()
 
         super().__init__(reactants, products, items=type_tokens, transform=self._prepare_strings, aug_prob=aug_prob)

@@ -468,6 +468,7 @@ class FineTuneReactionDataModule(_AbsDataModule):
                 "target": reacts_token_ids.clone()[1:, :],
                 "target_mask": reacts_pad_mask.clone()[1:, :],
                 "target_smiles": reacts_smiles,
+                "source_smiles": prods_smiles,
                 
                 "prods_adj": prods_adj,
                 "prods_atom": prods_atom,

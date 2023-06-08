@@ -162,15 +162,27 @@ class _AbsTransformerModel(pl.LightningModule):
 
     def test_step(self, batch, batch_idx):
         self.eval()
+        self.test_sampling_alg = "greedy"
 
         model_output = self.forward(batch)
         target_smiles = batch["target_smiles"]
+        source_smiles = batch["source_smiles"]
 
-        loss = self._calc_loss(batch, model_output)
+        loss, token_mask_loss, attn_loss = self._calc_loss(batch, model_output)
         token_acc = self._calc_token_acc(batch, model_output)
         perplexity = self._calc_perplexity(batch, model_output)
         mol_strs, log_lhs = self.sample_molecules(batch, sampling_alg=self.test_sampling_alg)
         metrics = self.sampler.calc_sampling_metrics(mol_strs, target_smiles)
+
+        with open("result.txt", "a") as f:
+            for i in range(len(mol_strs)):
+                f.write("pred: " + mol_strs[i] + "\n")
+                f.write("targ: " + target_smiles[i] + "\n")
+                f.write("sour: " + source_smiles[i] + "\n")
+                if mol_strs[i] == target_smiles[i]:
+                    f.write("True\n")
+                else:
+                    f.write("False\n")
 
         test_outputs = {
             "test_loss": loss.item(),

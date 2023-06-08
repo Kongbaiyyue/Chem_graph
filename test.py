@@ -235,24 +235,68 @@ from einops import rearrange, repeat
 # print(x)
 
 
-import rdkit
-import rdkit.Chem as Chem
-import numpy as np
+# import rdkit
+# import rdkit.Chem as Chem
+# import numpy as np
 
-# smi = "Cc1nc(OCCCCN2CCN(c3cccc4ccc(F)cc34)CC2)nc2c1cccn2C.O"
+# # smi = "Cc1nc(OCCCCN2CCN(c3cccc4ccc(F)cc34)CC2)nc2c1cccn2C.O"
+# # mol = Chem.MolFromSmiles(smi)
+# # print(mol)
+
+# # import pandas as pd
+# # df = pd.read_pickle("/public_data/oy/dataset/data/template/retro_uspto_50_template.pickle")
+# # df.to_csv("/public_data/oy/dataset/data/template/retro_uspto_50_template.csv")
+
+
+# smi = "O=C1CC[C@H](CN2CCN(CCOc3cc4ncnc(Nc5ccc(F)c(Cl)c5)c4cc3OC3CCCC3)CC2)O1"
 # mol = Chem.MolFromSmiles(smi)
-# print(mol)
+# atom_order = list(range(mol.GetNumAtoms()))
 
-# import pandas as pd
-# df = pd.read_pickle("/public_data/oy/dataset/data/template/retro_uspto_50_template.pickle")
-# df.to_csv("/public_data/oy/dataset/data/template/retro_uspto_50_template.csv")
+# np.random.shuffle(atom_order)
+# a = Chem.RenumberAtoms(mol, atom_order)
+# a = Chem.MolToSmiles(a, canonical=False)
+# print(a)
 
+path = "result.txt"
+len_count = 0
+count_can_len = 0
+count_can_len_same = 0
+count_source_same = 0
+with open(path, "r") as f:
+    lines = f.readlines()
 
-smi = "O=C1CC[C@H](CN2CCN(CCOc3cc4ncnc(Nc5ccc(F)c(Cl)c5)c4cc3OC3CCCC3)CC2)O1"
-mol = Chem.MolFromSmiles(smi)
-atom_order = list(range(mol.GetNumAtoms()))
+    for i in range(len(lines)):
+        if i % 4 == 0:
+            pred = lines[i].split(":")[1].strip()
+        elif i % 4 == 1:
+            targ = lines[i].split(":")[1].strip()
+        elif i % 4 == 2:
+            source = lines[i].split(":")[1].strip()
+        else:
+            cor = lines[i].strip()
+            if cor == "True" and source == pred:
+                count_source_same += 1
+            
+            if cor == "False" and len(pred) != len(targ):
+                len_count += 1
 
-np.random.shuffle(atom_order)
-a = Chem.RenumberAtoms(mol, atom_order)
-a = Chem.MolToSmiles(a, canonical=False)
-print(a)
+            tag = True
+            try:
+                pred_can = Chem.MolToSmiles(Chem.MolFromSmiles(pred), canonical=True)
+                targ_can = Chem.MolToSmiles(Chem.MolFromSmiles(targ), canonical=True)
+                tag = (not pred_can == targ_can)
+                # print(tag)
+            except Exception as e:
+                tag = True
+
+            if cor == "False" and tag:
+                if len(pred) != len(targ):
+                    count_can_len += 1
+                else:
+                    count_can_len_same += 1
+                
+print("len_count", len_count)
+print("count_can_len", count_can_len)
+print("count_can_len_same", count_can_len_same)
+print("count_source_same", count_source_same)
+
