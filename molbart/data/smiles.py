@@ -139,9 +139,16 @@ def smi_tokens(smi):
     """
     import re
 
-    pattern = "(\[[^\]]+]|Br?|Cl?|N|O|S|P|F|I|b|c|n|o|s|p|\(|\)|\.|=|#|-|\+|\\\\|\/|:|~|@|\?|>|\*|\$|\%[0-9]{2}|[0-9])"
+    # pattern = "(\[[^\]]+]|Br?|Cl?|N|O|S|P|F|I|b|c|n|o|s|p|\(|\)|\.|=|#|-|\+|\\\\|\/|:|~|@|\?|>|\*|\$|\%[0-9]{2}|[0-9])"
+    # regex = re.compile(pattern)
+    # tokens = [token for token in regex.findall(smi)]
+    # assert smi == ''.join(tokens)
+    # return tokens
+    pattern = "(\[[^\]]+]|Bi|Br?|Ge|Te|Mo|K|Ti|Zr|Y|Na|125I|Al|Ce|Cr|Cl?|Ni?|O|S|Pd?|Fe?|I|b|c|Mn|n|o|s|<unk>|>>|Li|p|\(|\)|\.|=|#|-|\+|\\\\|\/|:|@|\?|>|\*|\$|\%[0-9]{2}|[0-9])"
     regex = re.compile(pattern)
     tokens = [token for token in regex.findall(smi)]
+    if smi != ''.join(tokens):
+        print('ERROR:', smi, ''.join(tokens))
     assert smi == ''.join(tokens)
     return tokens
 
@@ -208,6 +215,58 @@ def get_atom_map(src, tgt):
     cross_attn = cross_attn.tolist()
     return cross_attn
 
+
+def mol_map_diff_smiles(smi1, smi2):
+    from rdkit.Chem.rdFMCS import FindMCS
+
+    src_chars = smi_tokens(smi1)
+    tgt_chars = smi_tokens(smi2)
+
+    src_mol = Chem.MolFromSmiles(smi1)
+    tgt_mol = Chem.MolFromSmiles(smi2)
+
+    atom_map = torch.zeros(src_mol.GetNumAtoms(), tgt_mol.GetNumAtoms())
+    cross_attn = torch.zeros(len(src_chars), len(tgt_chars))
+    not_atom_indices_src = list()
+    atom_indices_src = list()
+    pad_indices_src = list()
+    not_atom_indices_tgt = list()
+    atom_indices_tgt = list()
+    pad_indices_tgt = list()
+
+    tgt_mol = Chem.MolFromSmiles(smi2)
+    mols = [src_mol, tgt_mol]
+    result = FindMCS(mols, timeout=10)
+    result_mol = Chem.MolFromSmarts(result.smartsString)
+    src_mat = src_mol.GetSubstructMatches(result_mol)
+    tgt_mat = tgt_mol.GetSubstructMatches(result_mol)
+    if len(src_mat) > 0 and len(tgt_mat) > 0:
+        for i, j in zip(src_mat[0], tgt_mat[0]):
+            atom_map[i, j] = 1
+    
+    for j, cha in enumerate(src_chars):
+        if (len(cha) == 1 and not cha.isalpha()) or (len(cha) > 1 and cha[0] not in ['[', 'B', 'C']):
+            not_atom_indices_src.append(j)
+        else:
+            atom_indices_src.append(j)
+    for j, cha in enumerate(tgt_chars):
+        if (len(cha) == 1 and not cha.isalpha()) or (len(cha) > 1 and cha[0] not in ['[', 'B', 'C']):
+            not_atom_indices_tgt.append(j)
+        else:
+            atom_indices_tgt.append(j)
+    for x in range(len(src_chars)):
+        for y in range(len(tgt_chars)):
+            if x in pad_indices_src or y in pad_indices_tgt:
+                cross_attn[x, y] = 0
+            elif x in atom_indices_src and y in atom_indices_tgt:
+                cross_attn[x, y] = atom_map[atom_indices_src.index(x), atom_indices_tgt.index(y)]
+            elif x in not_atom_indices_src and y in not_atom_indices_tgt:
+                cross_attn[:, y] = 0
+                cross_attn[x, :] = 0
+                cross_attn[x, y] = 0
+
+    cross_attn = cross_attn.tolist()
+    return cross_attn
 
 
 # Symbols for different atoms

@@ -13,7 +13,8 @@ from molbart.data.util import TokenSampler
 from molbart.data.datasets import MoleculeDataset, ReactionDataset
 
 from molbart.data.smiles import (
-    get_graph_features_from_smi
+    get_graph_features_from_smi,
+    mol_map_diff_smiles
 )
 
 
@@ -420,6 +421,7 @@ class FineTuneReactionDataModule(_AbsDataModule):
         edges = []
         lengths = []
         smile2nodes = []
+        cross_attn = []
         
         for i, smi in enumerate(prods_smiles):
             # smi = smi.split(">", maxsplit=1)[1]
@@ -430,11 +432,14 @@ class FineTuneReactionDataModule(_AbsDataModule):
             edges.append(edge)
             lengths.append(len(atom_feature))
             # smile2nodes.append(smile2node)
+            # cross_attn.append(mol_map_diff_smiles(prods_smiles[i], reacts_smiles[i]))
+            cross_attn.append(mol_map_diff_smiles(reacts_smiles[i], prods_smiles[i]))
         
         prods_adj = self.tokeniser._pad_adj(prods_adj, 0)
         prods_atom, atom_masks = self.tokeniser._pad_atom(atom_features, 0)
         prods_edge = self.tokeniser._pad_edge(edges, 0)
         # prods_smile2nodes = self.tokeniser._pad_adj(smile2nodes, 0)
+        cross_attn = self.tokeniser._pad_adj(cross_attn, 0)
 
         lengths = torch.tensor(lengths)
         prods_adj = torch.tensor(prods_adj, dtype=torch.float32)
@@ -442,7 +447,7 @@ class FineTuneReactionDataModule(_AbsDataModule):
         prods_edge = torch.tensor(prods_edge, dtype=torch.float32)
         atom_masks = torch.tensor(atom_masks, dtype=torch.bool)
         # prods_smile2nodes = torch.tensor(prods_smile2nodes, dtype=torch.float32)
-
+        cross_attn = torch.tensor(cross_attn)
         
         if self.forward_pred:
             collate_output = {
@@ -470,6 +475,7 @@ class FineTuneReactionDataModule(_AbsDataModule):
                 "lengths": lengths,
                 "atom_masks": atom_masks,
                 # "prods_smile2nodes": prods_smile2nodes.permute(0, 2, 1),
+                "cross_attn": cross_attn
             }
 
         return collate_output

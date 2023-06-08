@@ -237,11 +237,22 @@ from einops import rearrange, repeat
 
 import rdkit
 import rdkit.Chem as Chem
+import numpy as np
 
 # smi = "Cc1nc(OCCCCN2CCN(c3cccc4ccc(F)cc34)CC2)nc2c1cccn2C.O"
 # mol = Chem.MolFromSmiles(smi)
 # print(mol)
 
-import pandas as pd
-df = pd.read_pickle("/public_data/oy/dataset/data/template/retro_uspto_50_template.pickle")
-df.to_csv("/public_data/oy/dataset/data/template/retro_uspto_50_template.csv")
+# import pandas as pd
+# df = pd.read_pickle("/public_data/oy/dataset/data/template/retro_uspto_50_template.pickle")
+# df.to_csv("/public_data/oy/dataset/data/template/retro_uspto_50_template.csv")
+
+
+smi = "O=C1CC[C@H](CN2CCN(CCOc3cc4ncnc(Nc5ccc(F)c(Cl)c5)c4cc3OC3CCCC3)CC2)O1"
+mol = Chem.MolFromSmiles(smi)
+atom_order = list(range(mol.GetNumAtoms()))
+
+np.random.shuffle(atom_order)
+a = Chem.RenumberAtoms(mol, atom_order)
+a = Chem.MolToSmiles(a, canonical=False)
+print(a)

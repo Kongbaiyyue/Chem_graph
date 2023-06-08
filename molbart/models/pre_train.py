@@ -10,7 +10,8 @@ from molbart.models.util import (
     PreNormDecoderLayer,
     FuncLR,
     PreNormCrossLayer,
-    PreNormCross
+    PreNormCross,
+    PreNormDecoder
 )
 from molbart.models.graph_transformer_pytorch import (
     GraphTransformer,
@@ -109,11 +110,13 @@ class _AbsTransformerModel(pl.LightningModule):
         self.train()
 
         model_output = self.forward(batch)
-        loss = self._calc_loss(batch, model_output)
+        loss, token_mask_loss, attn_loss = self._calc_loss(batch, model_output)
         token_acc = self._calc_token_acc(batch, model_output)
 
         self.log("train_loss", loss, on_step=True, logger=True, sync_dist=True)
         self.log("train_token", token_acc, on_step=True, logger=True, sync_dist=True)
+        self.log("token_mask_loss", token_mask_loss, on_step=True, logger=True, sync_dist=True)
+        self.log("attn_loss", attn_loss, on_step=True, logger=True, sync_dist=True)
 
         return loss
 
@@ -123,7 +126,7 @@ class _AbsTransformerModel(pl.LightningModule):
         model_output = self.forward(batch)
         target_smiles = batch["target_smiles"]
 
-        loss = self._calc_loss(batch, model_output)
+        loss, token_mask_loss, attn_loss = self._calc_loss(batch, model_output)
         token_acc = self._calc_token_acc(batch, model_output)
         perplexity = self._calc_perplexity(batch, model_output)
         mol_strs, log_lhs = self.sample_molecules(batch, sampling_alg=self.val_sampling_alg)
@@ -132,8 +135,16 @@ class _AbsTransformerModel(pl.LightningModule):
         mol_acc = torch.tensor(metrics["accuracy"], device=loss.device)
         invalid = torch.tensor(metrics["invalid"], device=loss.device)
 
+        total = len(mol_strs)
+        acc_str = 0
+        for i in range(len(mol_strs)):
+            if mol_strs[i] == target_smiles[i]:
+                acc_str += 1
+        acc_str = acc_str / total
+
         # Log for prog bar only
         self.log("mol_acc", mol_acc, prog_bar=True, logger=False, sync_dist=True)
+        self.log("acc_str", acc_str, prog_bar=True, logger=False, sync_dist=True)
         self.log("token_acc", token_acc, prog_bar=True, logger=False, sync_dist=True)
 
         val_outputs = {
@@ -411,10 +422,12 @@ class BARTModel(_AbsTransformerModel):
 
         dec_norm = nn.LayerNorm(d_model)
         dec_layer = PreNormDecoderLayer(d_model, num_heads, d_feedforward, dropout, activation)
-        self.decoder = nn.TransformerDecoder(dec_layer, num_layers, norm=dec_norm)
+        # self.decoder = nn.TransformerDecoder(dec_layer, num_layers, norm=dec_norm)
+        self.decoder = PreNormDecoder(dec_layer, num_layers, norm=dec_norm)
 
         self.token_fc = nn.Linear(d_model, vocab_size)
         self.loss_fn = nn.CrossEntropyLoss(reduction="none", ignore_index=pad_token_idx)
+        self.loss_attn_fn = nn.MSELoss(reduction='sum')
         self.log_softmax = nn.LogSoftmax(dim=2)
 
         self._init_params()
@@ -475,7 +488,7 @@ class BARTModel(_AbsTransformerModel):
             memory_key_padding_mask=atom_masks.clone()
         )
 
-        model_output = self.decoder(
+        model_output, decoder_att_weight = self.decoder(
             decoder_embs,
             memory,
             tgt_mask=tgt_mask,
@@ -487,7 +500,8 @@ class BARTModel(_AbsTransformerModel):
 
         output = {
             "model_output": model_output,
-            "token_output": token_output
+            "token_output": token_output,
+            "decoder_att_weight": decoder_att_weight
         }
 
         return output
@@ -561,7 +575,7 @@ class BARTModel(_AbsTransformerModel):
         seq_len, _, _ = tuple(decoder_embs.size())
         tgt_mask = self._generate_square_subsequent_mask(seq_len, device=decoder_embs.device)
 
-        model_output = self.decoder(
+        model_output, weight_attn = self.decoder(
             decoder_embs, 
             memory_input,
             tgt_key_padding_mask=decoder_pad_mask,
@@ -586,10 +600,22 @@ class BARTModel(_AbsTransformerModel):
         tokens = batch_input["target"]
         pad_mask = batch_input["target_mask"]
         token_output = model_output["token_output"]
+        decoder_att_weight = model_output["decoder_att_weight"]
+        cross_attn = batch_input["cross_attn"]
 
         token_mask_loss = self._calc_mask_loss(token_output, tokens, pad_mask)
+        if cross_attn is not None:
+            attns = decoder_att_weight[:, 1:, 1:-1]
+            attns_masked = attns.masked_fill(~cross_attn.bool(),
+                                                   0.0)
+            attn_loss = self.loss_attn_fn(attns_masked, cross_attn)
+            # print("decoder_att_weight", decoder_att_weight.shape)
+            # print("cross_attn", cross_attn.shape)
+        
+        loss = token_mask_loss + attn_loss
 
-        return token_mask_loss
+        # return token_mask_loss
+        return loss, token_mask_loss, attn_loss
 
     def _calc_mask_loss(self, token_output, target, target_mask):
         """ Calculate the loss for the token prediction task
@@ -606,11 +632,15 @@ class BARTModel(_AbsTransformerModel):
         seq_len, batch_size = tuple(target.size())
 
         token_pred = token_output.reshape((seq_len * batch_size, -1)).float()
-        loss = self.loss_fn(token_pred, target.reshape(-1)).reshape((seq_len, batch_size))
-
+        # loss = self.loss_fn(token_pred, target.reshape(-1)).reshape((seq_len, batch_size))
+        loss = self.loss_fn(token_pred, target.reshape(-1))
         inv_target_mask = ~(target_mask > 0)
-        num_tokens = inv_target_mask.sum()
-        loss = loss.sum() / num_tokens
+        inv_target_mask = inv_target_mask.reshape(-1)
+        loss = loss * inv_target_mask
+        loss = loss.sum()
+        # inv_target_mask = ~(target_mask > 0)
+        # num_tokens = inv_target_mask.sum()
+        # loss = loss.sum() / num_tokens
 
         return loss
 
