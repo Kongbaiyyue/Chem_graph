@@ -128,22 +128,27 @@ class _AbsTransformerModel(pl.LightningModule):
 
         loss, token_mask_loss, attn_loss = self._calc_loss(batch, model_output)
         token_acc = self._calc_token_acc(batch, model_output)
-        perplexity = self._calc_perplexity(batch, model_output)
-        mol_strs, log_lhs = self.sample_molecules(batch, sampling_alg=self.val_sampling_alg)
-        metrics = self.sampler.calc_sampling_metrics(mol_strs, target_smiles)
+        # perplexity = self._calc_perplexity(batch, model_output)
+        # mol_strs, log_lhs = self.sample_molecules(batch, sampling_alg=self.val_sampling_alg)
+        # metrics = self.sampler.calc_sampling_metrics(mol_strs, target_smiles)
 
-        mol_acc = torch.tensor(metrics["accuracy"], device=loss.device)
-        invalid = torch.tensor(metrics["invalid"], device=loss.device)
+        # mol_acc = torch.tensor(metrics["accuracy"], device=loss.device)
+        # invalid = torch.tensor(metrics["invalid"], device=loss.device)
+        mol_strs = self.get_str(model_output)
 
-        total = len(mol_strs)
+        total = len(target_smiles)
         acc_str = 0
-        for i in range(len(mol_strs)):
-            if mol_strs[i] == target_smiles[i]:
+        for i in range(len(target_smiles)):
+            flag = True
+            for j in range(len(target_smiles[i])):
+                if mol_strs[i][j] != target_smiles[i][j]:
+                    flag = False
+            if flag:
                 acc_str += 1
         acc_str = acc_str / total
 
         # Log for prog bar only
-        self.log("mol_acc", mol_acc, prog_bar=True, logger=False, sync_dist=True)
+        # self.log("mol_acc", mol_acc, prog_bar=True, logger=False, sync_dist=True)
         self.log("acc_str", acc_str, prog_bar=True, logger=False, sync_dist=True)
         self.log("token_acc", token_acc, prog_bar=True, logger=False, sync_dist=True)
 
@@ -170,12 +175,15 @@ class _AbsTransformerModel(pl.LightningModule):
 
         loss, token_mask_loss, attn_loss = self._calc_loss(batch, model_output)
         token_acc = self._calc_token_acc(batch, model_output)
-        perplexity = self._calc_perplexity(batch, model_output)
-        mol_strs, log_lhs = self.sample_molecules(batch, sampling_alg=self.test_sampling_alg)
-        metrics = self.sampler.calc_sampling_metrics(mol_strs, target_smiles)
+        # perplexity = self._calc_perplexity(batch, model_output)
+        # mol_strs, log_lhs = self.sample_molecules(batch, sampling_alg=self.test_sampling_alg)
+        # metrics = self.sampler.calc_sampling_metrics(mol_strs, target_smiles)
+
+
+        mol_strs = self.get_str(model_output)
 
         with open("result.txt", "a") as f:
-            for i in range(len(mol_strs)):
+            for i in range(len(target_smiles)):
                 f.write("pred: " + mol_strs[i] + "\n")
                 f.write("targ: " + target_smiles[i] + "\n")
                 f.write("sour: " + source_smiles[i] + "\n")
@@ -187,23 +195,23 @@ class _AbsTransformerModel(pl.LightningModule):
         test_outputs = {
             "test_loss": loss.item(),
             "test_token_acc": token_acc,
-            "test_perplexity": perplexity,
-            "test_invalid_smiles": metrics["invalid"]
+            # "test_perplexity": perplexity,
+            # "test_invalid_smiles": metrics["invalid"]
         }
 
-        if self.test_sampling_alg == "greedy":
-            test_outputs["test_molecular_accuracy"] = metrics["accuracy"]
+        # if self.test_sampling_alg == "greedy":
+        #     test_outputs["test_molecular_accuracy"] = metrics["accuracy"]
 
-        elif self.test_sampling_alg == "beam":
-            test_outputs["test_molecular_accuracy"] = metrics["top_1_accuracy"]
-            test_outputs["test_molecular_top_1_accuracy"] = metrics["top_1_accuracy"]
-            test_outputs["test_molecular_top_2_accuracy"] = metrics["top_2_accuracy"]
-            test_outputs["test_molecular_top_3_accuracy"] = metrics["top_3_accuracy"]
-            test_outputs["test_molecular_top_5_accuracy"] = metrics["top_5_accuracy"]
-            test_outputs["test_molecular_top_10_accuracy"] = metrics["top_10_accuracy"]
+        # elif self.test_sampling_alg == "beam":
+        #     test_outputs["test_molecular_accuracy"] = metrics["top_1_accuracy"]
+        #     test_outputs["test_molecular_top_1_accuracy"] = metrics["top_1_accuracy"]
+        #     test_outputs["test_molecular_top_2_accuracy"] = metrics["top_2_accuracy"]
+        #     test_outputs["test_molecular_top_3_accuracy"] = metrics["top_3_accuracy"]
+        #     test_outputs["test_molecular_top_5_accuracy"] = metrics["top_5_accuracy"]
+        #     test_outputs["test_molecular_top_10_accuracy"] = metrics["top_10_accuracy"]
 
-        else:
-            raise ValueError(f"Unknown test sampling algorithm, {self.test_sampling_alg}")
+        # else:
+        #     raise ValueError(f"Unknown test sampling algorithm, {self.test_sampling_alg}")
 
         return test_outputs
 
@@ -316,8 +324,10 @@ class _AbsTransformerModel(pl.LightningModule):
         return perp.mean()
 
     def _calc_token_acc(self, batch_input, model_output):
-        token_ids = batch_input["target"]
-        target_mask = batch_input["target_mask"]
+        # token_ids = batch_input["target"]
+        # target_mask = batch_input["target_mask"]
+        token_ids = batch_input["atom_token_ids"]
+        target_mask = batch_input["atom_tokens_pad_masks"]
         token_output = model_output["token_output"]
 
         target_mask = ~(target_mask > 0)
@@ -485,7 +495,8 @@ class BARTModel(_AbsTransformerModel):
         
         # text_embs = self.text_enc(encoder_embs.transpose(0, 1), mask=encoder_pad_mask)
         text_embs = self.encoder(encoder_embs, src_key_padding_mask=encoder_pad_mask)
-        node_embs, edge_embs = self.graph_enc(atom, edge, lengths=length, adj=adj)
+        # node_embs, edge_embs = self.graph_enc(atom, edge, lengths=length, adj=adj)
+        node_embs, edge_embs = self.graph_enc(atom, edge, lengths=length, adj=None)
         
         # memory = self.cross_enc(
         #     text_embs,
@@ -493,27 +504,33 @@ class BARTModel(_AbsTransformerModel):
         #     mask=atom_masks.clone()
         # ).transpose(0, 1)
         memory, att_weight = self.cross(
-            text_embs,
+            # text_embs,
+            # node_embs.transpose(1, 0),
             node_embs.transpose(1, 0),
+            text_embs,
             tgt_mask=None,
             tgt_key_padding_mask=None,
-            memory_key_padding_mask=atom_masks.clone()
-        )
-
-        model_output, decoder_att_weight = self.decoder(
-            decoder_embs,
-            memory,
-            tgt_mask=tgt_mask,
-            tgt_key_padding_mask=decoder_pad_mask,
             memory_key_padding_mask=encoder_pad_mask.clone()
+            # memory_key_padding_mask=atom_masks.clone()
+
         )
 
-        token_output = self.token_fc(model_output)
+        # model_output, decoder_att_weight = self.decoder(
+        #     decoder_embs,
+        #     memory,
+        #     tgt_mask=tgt_mask,
+        #     tgt_key_padding_mask=decoder_pad_mask,
+        #     memory_key_padding_mask=encoder_pad_mask.clone()
+        # )
+
+        # token_output = self.token_fc(model_output)
+        print("memory", memory.shape)
+        token_output = self.token_fc(memory)
 
         output = {
-            "model_output": model_output,
+            # "model_output": model_output,
             "token_output": token_output,
-            "decoder_att_weight": decoder_att_weight
+            # "decoder_att_weight": decoder_att_weight
         }
 
         return output
@@ -609,22 +626,31 @@ class BARTModel(_AbsTransformerModel):
             loss (singleton tensor),
         """
 
-        tokens = batch_input["target"]
-        pad_mask = batch_input["target_mask"]
+        # tokens = batch_input["target"]
+        # pad_mask = batch_input["target_mask"]
+        # target_smiles = batch_input["target_smiles"]
+
+        # print("target_smiles", target_smiles)
         token_output = model_output["token_output"]
-        decoder_att_weight = model_output["decoder_att_weight"]
-        cross_attn = batch_input["cross_attn"]
+        pad_mask = batch_input["atom_tokens_pad_masks"]
+        tokens = batch_input["atom_token_ids"]
+        # print("token_output", token_output.shape)
+        # print("tokens", tokens.shape)
+        # decoder_att_weight = model_output["decoder_att_weight"]
+        # cross_attn = batch_input["cross_attn"]
 
         token_mask_loss = self._calc_mask_loss(token_output, tokens, pad_mask)
-        if cross_attn is not None:
-            attns = decoder_att_weight[:, 1:, 1:-1]
-            attns_masked = attns.masked_fill(~cross_attn.bool(),
-                                                   0.0)
-            attn_loss = self.loss_attn_fn(attns_masked, cross_attn)
-            # print("decoder_att_weight", decoder_att_weight.shape)
-            # print("cross_attn", cross_attn.shape)
+        # if cross_attn is not None:
+        #     attns = decoder_att_weight[:, 1:, 1:-1]
+        #     attns_masked = attns.masked_fill(~cross_attn.bool(),
+        #                                            0.0)
+        #     attn_loss = self.loss_attn_fn(attns_masked, cross_attn)
+        #     # print("decoder_att_weight", decoder_att_weight.shape)
+        #     # print("cross_attn", cross_attn.shape)
         
-        loss = token_mask_loss + attn_loss
+        # loss = token_mask_loss + attn_loss
+        attn_loss = torch.tensor(0.0, device=token_output.device)
+        loss = token_mask_loss
 
         # return token_mask_loss
         return loss, token_mask_loss, attn_loss
@@ -719,6 +745,16 @@ class BARTModel(_AbsTransformerModel):
         }
         model_output = self.decode(decode_input)
         return model_output
+    
+    def get_str(self, model_output):
+        token_output = model_output["token_output"]
+        probs, output_ids = token_output.max(dim=2)
+
+        tokens = output_ids.transpose(0, 1).tolist()
+        tokens = self.sampler.tokeniser.convert_ids_to_tokens(tokens)
+        mol_strs = self.sampler.tokeniser.detokenise(tokens)
+
+        return mol_strs
 
 
 class UnifiedModel(_AbsTransformerModel):

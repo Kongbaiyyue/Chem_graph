@@ -269,6 +269,27 @@ def mol_map_diff_smiles(smi1, smi2):
     return cross_attn
 
 
+def get_atom_token(smiles):
+    atom_tokens = []
+    atom_smiles = []
+
+    for smi in smiles:
+        not_atom_indices_src = []
+        atom_indices_src = []
+
+        smi_chars = smi_tokens(smi)
+        for j, cha in enumerate(smi_chars):
+            if (len(cha) == 1 and not cha.isalpha()) or (len(cha) > 1 and cha[0] not in ['[', 'B', 'C']):
+                not_atom_indices_src.append(j)
+            else:
+                atom_indices_src.append(cha)
+        
+        atom_tokens.append(atom_indices_src)
+        atom_smiles.append(''.join(atom_indices_src))
+
+    return atom_tokens, atom_smiles
+
+
 # Symbols for different atoms
 ATOM_LIST = ['C', 'N', 'O', 'S', 'F', 'Si', 'P', 'Cl', 'Br', 'Mg', 'Na', 'Ca', 'Fe',
              'As', 'Al', 'I', 'B', 'V', 'K', 'Tl', 'Yb', 'Sb', 'Sn', 'Ag', 'Pd', 'Co', 'Se', 'Ti',

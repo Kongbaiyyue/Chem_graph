@@ -257,46 +257,83 @@ from einops import rearrange, repeat
 # a = Chem.MolToSmiles(a, canonical=False)
 # print(a)
 
-path = "result.txt"
-len_count = 0
-count_can_len = 0
-count_can_len_same = 0
-count_source_same = 0
-with open(path, "r") as f:
-    lines = f.readlines()
+def read_res():
+    path = "result.txt"
+    len_count = 0
+    count_can_len = 0
+    count_can_len_same = 0
+    count_source_same = 0
+    with open(path, "r") as f:
+        lines = f.readlines()
 
-    for i in range(len(lines)):
-        if i % 4 == 0:
-            pred = lines[i].split(":")[1].strip()
-        elif i % 4 == 1:
-            targ = lines[i].split(":")[1].strip()
-        elif i % 4 == 2:
-            source = lines[i].split(":")[1].strip()
-        else:
-            cor = lines[i].strip()
-            if cor == "True" and source == pred:
-                count_source_same += 1
-            
-            if cor == "False" and len(pred) != len(targ):
-                len_count += 1
-
-            tag = True
-            try:
-                pred_can = Chem.MolToSmiles(Chem.MolFromSmiles(pred), canonical=True)
-                targ_can = Chem.MolToSmiles(Chem.MolFromSmiles(targ), canonical=True)
-                tag = (not pred_can == targ_can)
-                # print(tag)
-            except Exception as e:
-                tag = True
-
-            if cor == "False" and tag:
-                if len(pred) != len(targ):
-                    count_can_len += 1
-                else:
-                    count_can_len_same += 1
+        for i in range(len(lines)):
+            if i % 4 == 0:
+                pred = lines[i].split(":")[1].strip()
+            elif i % 4 == 1:
+                targ = lines[i].split(":")[1].strip()
+            elif i % 4 == 2:
+                source = lines[i].split(":")[1].strip()
+            else:
+                cor = lines[i].strip()
+                if cor == "True" and source == pred:
+                    count_source_same += 1
                 
-print("len_count", len_count)
-print("count_can_len", count_can_len)
-print("count_can_len_same", count_can_len_same)
-print("count_source_same", count_source_same)
+                if cor == "False" and len(pred) != len(targ):
+                    len_count += 1
+
+                tag = True
+                try:
+                    pred_can = Chem.MolToSmiles(Chem.MolFromSmiles(pred), canonical=True)
+                    targ_can = Chem.MolToSmiles(Chem.MolFromSmiles(targ), canonical=True)
+                    tag = (not pred_can == targ_can)
+                    # print(tag)
+                except Exception as e:
+                    tag = True
+
+                if cor == "False" and tag:
+                    if len(pred) != len(targ):
+                        count_can_len += 1
+                    else:
+                        count_can_len_same += 1
+                    
+    print("len_count", len_count)
+    print("count_can_len", count_can_len)
+    print("count_can_len_same", count_can_len_same)
+    print("count_source_same", count_source_same)
+
+
+def smi_tokens(smi):
+    """
+    Tokenize a SMILES molecule or reaction
+    """
+    import re
+
+    # pattern = "(\[[^\]]+]|Br?|Cl?|N|O|S|P|F|I|b|c|n|o|s|p|\(|\)|\.|=|#|-|\+|\\\\|\/|:|~|@|\?|>|\*|\$|\%[0-9]{2}|[0-9])"
+    # regex = re.compile(pattern)
+    # tokens = [token for token in regex.findall(smi)]
+    # assert smi == ''.join(tokens)
+    # return tokens
+    pattern = "(\[[^\]]+]|Bi|Br?|Ge|Te|Mo|K|Ti|Zr|Y|Na|125I|Al|Ce|Cr|Cl?|Ni?|O|S|Pd?|Fe?|I|b|c|Mn|n|o|s|<unk>|>>|Li|p|\(|\)|\.|=|#|-|\+|\\\\|\/|:|@|\?|>|\*|\$|\%[0-9]{2}|[0-9])"
+    regex = re.compile(pattern)
+    tokens = [token for token in regex.findall(smi)]
+    if smi != ''.join(tokens):
+        print('ERROR:', smi, ''.join(tokens))
+    assert smi == ''.join(tokens)
+    return tokens
+
+# not_atom_indices_src = []
+# atom_indices_src = []
+
+# smi_chars = smi_tokens("C(CCCl)Oc1c(-c2cccc(N(C(NCCCCCCC)=O)C)c2)ccc(CCC(=O)OC)c1")
+# for j, cha in enumerate(smi_chars):
+#     if (len(cha) == 1 and not cha.isalpha()) or (len(cha) > 1 and cha[0] not in ['[', 'B', 'C']):
+#         not_atom_indices_src.append(j)
+#     else:
+#         atom_indices_src.append(cha)
+
+# print(atom_indices_src)
+# print(len(atom_indices_src))
+# "O=C1CC[C@H](CN2CCN(CCOc3cc4ncnc(Nc5ccc(F)c(Cl)c5)c4cc3OC3CCCC3)CC2)O1"
+# "O=C1CC[C@H](CN2CCN(CCOc3cc4ncnc(Nc5ccc(F)c(Cl)c5)c4cc3OC3CCCC3)CC2)O1"
+
 
