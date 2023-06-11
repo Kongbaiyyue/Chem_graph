@@ -17,6 +17,7 @@ from molbart.models.graph_transformer_pytorch import (
     GraphTransformer,
     TextTransformer,
     Attention,
+    GraphCrossformer
 )
 
 
@@ -139,11 +140,13 @@ class _AbsTransformerModel(pl.LightningModule):
         total = len(target_smiles)
         acc_str = 0
         for i in range(len(target_smiles)):
-            flag = True
-            for j in range(len(target_smiles[i])):
-                if mol_strs[i][j] != target_smiles[i][j]:
-                    flag = False
-            if flag:
+            # flag = True
+            # for j in range(len(target_smiles[i])):
+            #     if mol_strs[i][j] != target_smiles[i][j]:
+            #         flag = False
+            # if flag:
+            #     acc_str += 1
+            if mol_strs[i] == target_smiles[i]:
                 acc_str += 1
         acc_str = acc_str / total
 
@@ -411,11 +414,27 @@ class BARTModel(_AbsTransformerModel):
         for _ in range(3):
             attention.append(Attention(d_model, pos_emb=None, edge_dim=d_model, dim_head=dim_head, heads=num_heads))
         
-        self.graph_enc = GraphTransformer( 
+        # self.graph_enc = GraphTransformer( 
+        #     input_dim=9,
+        #     h_dim=d_model,
+        #     depth=3,
+        #     attention=attention,
+        #     edge_input_dim=9,
+        #     edge_h_dim=d_model,
+        #     # optional - if left out, edge dimensions is assumed to be the same as the node dimensions above
+        #     with_feedforwards=True,
+        #     # whether to add a feedforward after each attention layer, suggested by literature to be needed
+        #     gated_residual=True,  # to use the gated residual to prevent over-smoothing
+        #     rel_pos_emb=True
+        # )
+
+        self.graph_enc = GraphCrossformer(
             input_dim=9,
             h_dim=d_model,
             depth=3,
-            attention=attention,
+            corss_d_feedforward=d_feedforward,
+            cross_dropout=dropout,
+            cross_activation=activation,
             edge_input_dim=9,
             edge_h_dim=d_model,
             # optional - if left out, edge dimensions is assumed to be the same as the node dimensions above
@@ -425,22 +444,9 @@ class BARTModel(_AbsTransformerModel):
             rel_pos_emb=True
         )
         
-        # self.text_enc = TextTransformer(
-        #     h_dim=d_model,
-        #     depth=num_layers // 2,
-        #     attention=attention[:num_layers // 2],
-        #     with_feedforwards=True,
-        # )
-        
-        # self.cross_enc = TextTransformer(
-        #     h_dim=d_model,
-        #     depth=num_layers // 2,
-        #     attention=attention[num_layers // 2:],
-        #     with_feedforwards=True,
-        # )
-        cross_norm = nn.LayerNorm(d_model)
-        cross_layer = PreNormCrossLayer(d_model, num_heads, d_feedforward, dropout, activation)
-        self.cross = PreNormCross(cross_layer, num_layers // 2, norm=cross_norm)
+        # cross_norm = nn.LayerNorm(d_model)
+        # cross_layer = PreNormCrossLayer(d_model, num_heads, d_feedforward, dropout, activation)
+        # self.cross = PreNormCross(cross_layer, num_layers // 2, norm=cross_norm)
 
         dec_norm = nn.LayerNorm(d_model)
         dec_layer = PreNormDecoderLayer(d_model, num_heads, d_feedforward, dropout, activation)
@@ -496,24 +502,22 @@ class BARTModel(_AbsTransformerModel):
         # text_embs = self.text_enc(encoder_embs.transpose(0, 1), mask=encoder_pad_mask)
         text_embs = self.encoder(encoder_embs, src_key_padding_mask=encoder_pad_mask)
         # node_embs, edge_embs = self.graph_enc(atom, edge, lengths=length, adj=adj)
-        node_embs, edge_embs = self.graph_enc(atom, edge, lengths=length, adj=None)
-        
-        # memory = self.cross_enc(
-        #     text_embs,
-        #     node=node_embs,
-        #     mask=atom_masks.clone()
-        # ).transpose(0, 1)
-        memory, att_weight = self.cross(
-            # text_embs,
-            # node_embs.transpose(1, 0),
-            node_embs.transpose(1, 0),
-            text_embs,
+        memory, att_weight = self.graph_enc(atom, edge, lengths=length, adj=None, memory=text_embs,
             tgt_mask=None,
             tgt_key_padding_mask=None,
-            memory_key_padding_mask=encoder_pad_mask.clone()
-            # memory_key_padding_mask=atom_masks.clone()
+            memory_key_padding_mask=encoder_pad_mask.clone())
+        
+        # memory, att_weight = self.cross(
+        #     # text_embs,
+        #     # node_embs.transpose(1, 0),
+        #     node_embs.transpose(1, 0),
+        #     text_embs,
+        #     tgt_mask=None,
+        #     tgt_key_padding_mask=None,
+        #     memory_key_padding_mask=encoder_pad_mask.clone()
+        #     # memory_key_padding_mask=atom_masks.clone()
 
-        )
+        # )
 
         # model_output, decoder_att_weight = self.decoder(
         #     decoder_embs,
@@ -524,7 +528,6 @@ class BARTModel(_AbsTransformerModel):
         # )
 
         # token_output = self.token_fc(model_output)
-        print("memory", memory.shape)
         token_output = self.token_fc(memory)
 
         output = {

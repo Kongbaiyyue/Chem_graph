@@ -4,6 +4,8 @@ from einops import rearrange, repeat
 
 from rotary_embedding_torch import RotaryEmbedding, apply_rotary_emb
 
+from molbart.models.util import PreNormDecoderLayer
+
 
 def sequence_mask(lengths, max_len=None):
     """
@@ -255,6 +257,91 @@ class TextTransformer(nn.Module):
 
         return text
     
+
+class GraphCrossformer(nn.Module):
+    def __init__(
+        self,
+        input_dim,
+        h_dim,
+        depth,
+        corss_d_feedforward=None,
+        cross_dropout=None,
+        cross_activation=None,
+        dim_head=64,
+        edge_input_dim=None,
+        edge_h_dim=None,
+        heads=8,
+        gated_residual=True,
+        with_feedforwards = False,
+        norm_edges = False,
+        rel_pos_emb = False,
+    ):
+        super().__init__()
+        self.layers = List([])
+        edge_h_dim = default(edge_h_dim, h_dim)
+
+        self.n_emb = nn.Linear(input_dim, h_dim)
+        self.e_emb = nn.Linear(edge_input_dim, edge_h_dim)
+        self.norm_edges = nn.LayerNorm(edge_h_dim) if norm_edges else nn.Identity()
+
+        assert h_dim % heads == 0
+        dim_head = h_dim // heads
+
+        pos_emb = RotaryEmbedding(dim_head) if rel_pos_emb else None
+
+        for i in range(depth):
+            self.layers.append(List([
+                List([
+                    PreNorm(h_dim, Attention(h_dim, pos_emb=pos_emb, edge_dim=edge_h_dim, dim_head=dim_head, heads=heads)),
+                    # PreNorm(h_dim, attention[i]),
+                    GatedResidual(h_dim)
+                ]),
+                List([
+                    PreNorm(h_dim, FeedForward(h_dim)),
+                    GatedResidual(h_dim)
+                ]) if with_feedforwards else None,
+                List([
+                    PreNormDecoderLayer(h_dim, heads, corss_d_feedforward, cross_dropout, cross_activation),
+                    nn.LayerNorm(h_dim)
+                ]),
+            ]))
+
+    def forward(self, nodes, edges=None, lengths=None, adj=None, memory=None, tgt_mask=None,
+                memory_mask=None, tgt_key_padding_mask=None, memory_key_padding_mask=None):
+        nodes = self.n_emb(nodes)
+        if edges is not None:
+            edges = self.e_emb(edges)
+            edges = self.norm_edges(edges)
+
+        mask = None
+        if isinstance(adj, torch.Tensor):
+            mask = ~sequence_mask(lengths).unsqueeze(1) + ~adj.bool()
+            # mask = ~sequence_mask(lengths).unsqueeze(1)
+        elif adj is None:
+            mask = ~sequence_mask(lengths).unsqueeze(1)
+
+        for attn_block, ff_block, cross_block in self.layers:
+            attn, attn_residual = attn_block
+            nodes = attn_residual(attn(nodes, edges, mask=mask), nodes)
+
+            if exists(ff_block):
+                ff, ff_residual = ff_block
+                nodes = ff_residual(ff(nodes), nodes)
+            
+            output = nodes.transpose(1, 0)
+            
+            mod, cross_norm = cross_block
+            
+            output, att_weight = mod(output, memory, tgt_mask=tgt_mask,
+                memory_mask=memory_mask,
+                tgt_key_padding_mask=tgt_key_padding_mask,
+                memory_key_padding_mask=memory_key_padding_mask)            
+
+            if cross_norm is not None:
+                output = cross_norm(output)
+
+
+        return output, att_weight
 
 
 if __name__ == '__main__':

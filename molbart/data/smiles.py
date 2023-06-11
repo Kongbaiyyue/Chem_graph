@@ -269,6 +269,27 @@ def mol_map_diff_smiles(smi1, smi2):
     return cross_attn
 
 
+def mol_map_atom(smi1, smi2):
+    from rdkit.Chem.rdFMCS import FindMCS
+
+    src_mol = Chem.MolFromSmiles(smi1)
+    tgt_mol = Chem.MolFromSmiles(smi2)
+
+    atom_map = torch.zeros(src_mol.GetNumAtoms(), tgt_mol.GetNumAtoms())
+
+    tgt_mol = Chem.MolFromSmiles(smi2)
+    mols = [src_mol, tgt_mol]
+    result = FindMCS(mols, timeout=10)
+    result_mol = Chem.MolFromSmarts(result.smartsString)
+    src_mat = src_mol.GetSubstructMatches(result_mol)
+    tgt_mat = tgt_mol.GetSubstructMatches(result_mol)
+    if len(src_mat) > 0 and len(tgt_mat) > 0:
+        for i, j in zip(src_mat[0], tgt_mat[0]):
+            atom_map[i, j] = 1
+
+    return atom_map
+
+
 def get_atom_token(smiles):
     atom_tokens = []
     atom_smiles = []

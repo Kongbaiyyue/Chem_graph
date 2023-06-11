@@ -15,7 +15,8 @@ from molbart.data.datasets import MoleculeDataset, ReactionDataset
 from molbart.data.smiles import (
     get_graph_features_from_smi,
     mol_map_diff_smiles,
-    get_atom_token
+    get_atom_token,
+    mol_map_atom
 )
 
 
@@ -412,8 +413,8 @@ class FineTuneReactionDataModule(_AbsDataModule):
         reacts_token_ids = self.tokeniser.convert_tokens_to_ids(reacts_tokens)
         prods_token_ids = self.tokeniser.convert_tokens_to_ids(prods_tokens)
 
-        atom_tokens_org, atom_smiles = get_atom_token(reacts_smiles)
-        # atom_tokens_org, atom_smiles = get_atom_token(prods_smiles)
+        # atom_tokens_org, atom_smiles = get_atom_token(reacts_smiles)
+        atom_tokens_org, atom_smiles = get_atom_token(prods_smiles)
         atom_tokens, atom_tokens_pad_masks = self.tokeniser._pad_seqs(atom_tokens_org, self.tokeniser.pad_token)
         atom_token_ids = self.tokeniser.convert_tokens_to_ids(atom_tokens)
 
@@ -431,6 +432,7 @@ class FineTuneReactionDataModule(_AbsDataModule):
         lengths = []
         smile2nodes = []
         # cross_attn = []
+        atom_order = []
         
         for i, smi in enumerate(prods_smiles):
             # smi = smi.split(">", maxsplit=1)[1]
@@ -443,12 +445,14 @@ class FineTuneReactionDataModule(_AbsDataModule):
             # smile2nodes.append(smile2node)
             # cross_attn.append(mol_map_diff_smiles(prods_smiles[i], reacts_smiles[i]))
             # cross_attn.append(mol_map_diff_smiles(reacts_smiles[i], prods_smiles[i]))
+            atom_order.append(mol_map_atom(reacts_smiles[i], prods_smiles[i]))
         
         prods_adj = self.tokeniser._pad_adj(prods_adj, 0)
         prods_atom, atom_masks = self.tokeniser._pad_atom(atom_features, 0)
         prods_edge = self.tokeniser._pad_edge(edges, 0)
         # prods_smile2nodes = self.tokeniser._pad_adj(smile2nodes, 0)
         # cross_attn = self.tokeniser._pad_adj(cross_attn, 0)
+        atom_order = self.tokeniser._pad_adj(atom_order, 0)
 
         lengths = torch.tensor(lengths)
         prods_adj = torch.tensor(prods_adj, dtype=torch.float32)
@@ -457,6 +461,7 @@ class FineTuneReactionDataModule(_AbsDataModule):
         atom_masks = torch.tensor(atom_masks, dtype=torch.bool)
         # prods_smile2nodes = torch.tensor(prods_smile2nodes, dtype=torch.float32)
         # cross_attn = torch.tensor(cross_attn)
+        atom_order = torch.tensor(atom_order, dtype=torch.bool)
         
         if self.forward_pred:
             collate_output = {
@@ -488,7 +493,8 @@ class FineTuneReactionDataModule(_AbsDataModule):
                 # "prods_smile2nodes": prods_smile2nodes.permute(0, 2, 1),
                 # "cross_attn": cross_attn
                 "atom_token_ids": atom_token_ids,
-                "atom_tokens_pad_masks": atom_tokens_pad_masks
+                "atom_tokens_pad_masks": atom_tokens_pad_masks,
+                "atom_order": atom_order
             }
 
         return collate_output
