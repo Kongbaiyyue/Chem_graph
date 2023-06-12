@@ -206,10 +206,10 @@ class GraphTransformer(nn.Module):
 
         mask = None
         if isinstance(adj, torch.Tensor):
-            mask = ~sequence_mask(lengths).unsqueeze(1) + ~adj.bool()
+            mask = sequence_mask(lengths).unsqueeze(1) + ~adj.bool()
             # mask = ~sequence_mask(lengths).unsqueeze(1)
         elif adj is None:
-            mask = ~sequence_mask(lengths).unsqueeze(1)
+            mask = sequence_mask(lengths).unsqueeze(1)
 
         for attn_block, ff_block in self.layers:
             attn, attn_residual = attn_block
@@ -315,10 +315,10 @@ class GraphCrossformer(nn.Module):
 
         mask = None
         if isinstance(adj, torch.Tensor):
-            mask = ~sequence_mask(lengths).unsqueeze(1) + ~adj.bool()
+            mask = sequence_mask(lengths).unsqueeze(1) + ~adj.bool()
             # mask = ~sequence_mask(lengths).unsqueeze(1)
         elif adj is None:
-            mask = ~sequence_mask(lengths).unsqueeze(1)
+            mask = sequence_mask(lengths).unsqueeze(1)
 
         for attn_block, ff_block, cross_block in self.layers:
             attn, attn_residual = attn_block
