@@ -300,6 +300,21 @@ class MolEncTokeniser:
 
         strs = ["".join(tokens) for tokens in new_tokens_list]
         return strs
+    
+    def detokens(self, tokens_list):
+        new_tokens_list = []
+        for tokens in tokens_list:
+            if tokens[0] == self.begin_token:
+                tokens = tokens[1:]
+
+            # Remove any tokens after the end token (and end token) if it's there 
+            if self.end_token in tokens:
+                end_token_idx = tokens.index(self.end_token)
+                tokens = tokens[:end_token_idx]
+
+            new_tokens_list.append(tokens)
+
+        return new_tokens_list
 
     def convert_tokens_to_ids(self, token_data):
         ids_list = []

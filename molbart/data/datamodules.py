@@ -413,8 +413,8 @@ class FineTuneReactionDataModule(_AbsDataModule):
         reacts_token_ids = self.tokeniser.convert_tokens_to_ids(reacts_tokens)
         prods_token_ids = self.tokeniser.convert_tokens_to_ids(prods_tokens)
 
-        # atom_tokens_org, atom_smiles = get_atom_token(reacts_smiles)
-        atom_tokens_org, atom_smiles = get_atom_token(prods_smiles)
+        atom_tokens_org, atom_smiles = get_atom_token(reacts_smiles)
+        # atom_tokens_org, atom_smiles = get_atom_token(prods_smiles)
         atom_tokens, atom_tokens_pad_masks = self.tokeniser._pad_seqs(atom_tokens_org, self.tokeniser.pad_token)
         atom_token_ids = self.tokeniser.convert_tokens_to_ids(atom_tokens)
 
@@ -445,7 +445,7 @@ class FineTuneReactionDataModule(_AbsDataModule):
             # smile2nodes.append(smile2node)
             # cross_attn.append(mol_map_diff_smiles(prods_smiles[i], reacts_smiles[i]))
             # cross_attn.append(mol_map_diff_smiles(reacts_smiles[i], prods_smiles[i]))
-            atom_order.append(mol_map_atom(reacts_smiles[i], prods_smiles[i]))
+            atom_order.append(mol_map_atom(prods_smiles[i], reacts_smiles[i]))
         
         prods_adj = self.tokeniser._pad_adj(prods_adj, 0)
         prods_atom, atom_masks = self.tokeniser._pad_atom(atom_features, 0)
@@ -461,7 +461,7 @@ class FineTuneReactionDataModule(_AbsDataModule):
         atom_masks = torch.tensor(atom_masks, dtype=torch.bool)
         # prods_smile2nodes = torch.tensor(prods_smile2nodes, dtype=torch.float32)
         # cross_attn = torch.tensor(cross_attn)
-        atom_order = torch.tensor(atom_order, dtype=torch.bool)
+        atom_order = torch.tensor(atom_order)
         
         if self.forward_pred:
             collate_output = {
@@ -484,6 +484,7 @@ class FineTuneReactionDataModule(_AbsDataModule):
                 # "target_smiles": reacts_smiles,
                 "target_smiles": atom_smiles,
                 "source_smiles": prods_smiles,
+                "atom_tokens_org": atom_tokens_org,
                 
                 "prods_adj": prods_adj,
                 "prods_atom": prods_atom,

@@ -287,6 +287,7 @@ def mol_map_atom(smi1, smi2):
         for i, j in zip(src_mat[0], tgt_mat[0]):
             atom_map[i, j] = 1
 
+    atom_map = atom_map.tolist()
     return atom_map
 
 

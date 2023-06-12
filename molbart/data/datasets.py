@@ -148,10 +148,6 @@ class ReactionDataset(_AbsDataset):
                 return Chem.MolToSmiles(mol, canonical=False)
 
         # mol_str = Chem.MolToSmiles(mol_del, canonical=False)
-        if other_mol is not None:
-            other_mol_aug = self.aug([other_mol])[0] if aug else other_mol
-            other_mol_str = Chem.MolToSmiles(other_mol_aug, canonical=not aug)
-            return mol_str, other_mol_str
 
         return mol_str
 
@@ -163,6 +159,7 @@ class Uspto50(ReactionDataset):
         # reactants = df["reactants_mol"].tolist()
         products = df["products_mol"].tolist()
         # reactants = df["reactants"].tolist()
+        # reactants = df["products"].tolist()
         reactants = df["products"].tolist()
         type_tokens = df["reaction_type"].tolist()
 
@@ -178,6 +175,7 @@ class Uspto50(ReactionDataset):
         prod_str = self._augment_to_smiles(prod)
         # react_str = self._augment_to_smiles(prod)
         # prod_str = self._del_bond_to_smiles(prod)
+        # react_str = prod
         react_str = react
         # prod_str = prod
 

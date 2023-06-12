@@ -1,0 +1,43 @@
+{
+    "configurations": [
+        {
+            "name": "Python: fine tune",
+            "type": "python",
+            "request": "launch",
+            // "program": "/public_data/oy/Chem_graph/molbart/fine_tune.py",
+            "module": "molbart.fine_tune",
+            // "console": "integratedTerminal",
+            "justMyCode": true,
+            // "cwd": "/public_data/oy/Chem_graph",
+            "args": [
+                "--dataset",
+                "uspto_50",
+                "--data_path", 
+                "../dataset/data/template/retro_uspto_50_template_md.pickle",
+                "--model_path",
+                "none",
+                "--task", 
+                "backward_prediction",
+                "--epochs", 
+                "100", 
+                "--lr", 
+                "1",
+                "--schedule",
+                "transformer", 
+                "--batch_size", 
+                "3", 
+                "--acc_batches", 
+                "4", 
+                "--augment", 
+                "all", 
+                "--aug_prob", 
+                "0.5",
+                "--d_model",
+                "16",
+                "--d_feedforward",
+                "32"
+            ]
+            // "cwd": "/home/ubuntu/anaconda3/envs/molbart/bin/"
+        }
+    ]
+}

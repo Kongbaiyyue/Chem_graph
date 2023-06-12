@@ -321,6 +321,38 @@ def smi_tokens(smi):
     assert smi == ''.join(tokens)
     return tokens
 
+def mol_map_atom(smi1, smi2):
+    from rdkit.Chem.rdFMCS import FindMCS
+
+    src_mol = Chem.MolFromSmiles(smi1)
+    tgt_mol = Chem.MolFromSmiles(smi2)
+
+    atom_map = torch.zeros(src_mol.GetNumAtoms(), tgt_mol.GetNumAtoms())
+
+    tgt_mol = Chem.MolFromSmiles(smi2)
+    mols = [src_mol, tgt_mol]
+    result = FindMCS(mols, timeout=10)
+    result_mol = Chem.MolFromSmarts(result.smartsString)
+    src_mat = src_mol.GetSubstructMatches(result_mol)
+    tgt_mat = tgt_mol.GetSubstructMatches(result_mol)
+    if len(src_mat) > 0 and len(tgt_mat) > 0:
+        for i, j in zip(src_mat[0], tgt_mat[0]):
+            atom_map[i, j] = 1
+
+    atom_map = atom_map.tolist()
+    return atom_map
+
+
+
+# reac = "C([C@H]1CCC(=O)O1)N1CCN(CCOc2cc3ncnc(Nc4ccc(F)c(Cl)c4)c3cc2OC2CCCC2)CC1"
+# prod = "O=C1CC[C@H](CN2CCN(CCOc3cc4ncnc(Nc5ccc(F)c(Cl)c5)c4cc3OC3CCCC3)CC2)O1"
+
+# atom_map = mol_map_atom(prod, reac)
+# print(atom_map)
+
+
+
+
 # not_atom_indices_src = []
 # atom_indices_src = []
 
@@ -334,6 +366,67 @@ def smi_tokens(smi):
 # print(atom_indices_src)
 # print(len(atom_indices_src))
 # "O=C1CC[C@H](CN2CCN(CCOc3cc4ncnc(Nc5ccc(F)c(Cl)c5)c4cc3OC3CCCC3)CC2)O1"
-a = "O=C1CC[C@H](CN2CCN(CCOc3cc4ncnc(Nc5ccc(F)c(Cl)c5)c4cc3OC3CCCC3)CC2)O1"
-print(a[10])
+# a = "O=C1CC[C@H](CN2CCN(CCOc3cc4ncnc(Nc5ccc(F)c(Cl)c5)c4cc3OC3CCCC3)CC2)O1"
+# print(a[10])
 
+# einsum 行列变换
+# # 定义行数和列数
+# rows = 3
+# cols = 3
+
+# # 生成一个单位矩阵
+# identity = torch.eye(rows, cols)
+
+# # 进行行变换操作
+# row_indices = torch.tensor([1, 0, 2])  # 定义行变换的索引顺序
+# reorder_attn = identity[row_indices]    # 变换矩阵
+
+
+# edges = torch.randn(1, 3, 3, 5)
+# reorder_attn = reorder_attn.unsqueeze(0)
+# # reorder_attn = torch.randn(1, 3, 3)
+# # c = edges * reorder_attn
+# print("reorder_attn\n", reorder_attn.shape)
+# print("edges:\n", edges)
+# # c = edges * reorder_attn
+# # c = einsum('b i k, b i j d -> b k j d', reorder_attn, edges)   # 行变换
+# c = einsum('b j i d, b i k -> b j k d', edges, reorder_attn)   # 列变换
+# print("C: \n", c)
+
+
+# import torch
+
+# # 创建维度为 n*m 的行变换矩阵 a
+# a = torch.tensor([[1, 0, 0],
+#                   [0, 0, 1],
+#                   [0, 1, 0]])
+
+# # 创建维度为 n*m*d 的张量 b
+# b = torch.randn(3, 3, 2)
+
+# print("b\n", b)
+# # 使用索引操作将行变换应用于张量 b
+# transformed_b = b.unsqueeze(2) * a.unsqueeze(0).unsqueeze(3)
+
+
+# print("result\n", transformed_b)
+
+
+# import torch
+
+# # 创建维度为 n*m 的行变换矩阵 a
+# a = torch.tensor([[1, 0, 0],
+#                   [0, 0, 1],
+#                   [0, 1, 0]])
+
+# # 创建维度为 n*m*d 的张量 b
+# b = torch.randn(3, 3, 2)
+
+# # 将 a 和 b 进行矩阵乘法
+# transformed_b = torch.matmul(a.unsqueeze(0), b.unsqueeze(3)).squeeze()
+
+# print(transformed_b)
+
+import molbart.util as util
+
+print(123)

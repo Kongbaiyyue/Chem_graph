@@ -116,16 +116,26 @@ class _AbsTransformerModel(pl.LightningModule):
 
         self.log("train_loss", loss, on_step=True, logger=True, sync_dist=True)
         self.log("train_token", token_acc, on_step=True, logger=True, sync_dist=True)
-        self.log("token_mask_loss", token_mask_loss, on_step=True, logger=True, sync_dist=True)
-        self.log("attn_loss", attn_loss, on_step=True, logger=True, sync_dist=True)
+        self.log("token_mask_loss", token_mask_loss, prog_bar=True, logger=False, sync_dist=True)
+        self.log("attn_loss", attn_loss, prog_bar=True, logger=False, sync_dist=True)
 
-        return loss
+        train_loss = {
+            "loss" : loss,
+            "token_mask_loss" : token_mask_loss,
+            "attn_loss": attn_loss
+        }
+        return train_loss
+    
+    def training_epoch_end(self, outputs):
+        avg_outputs = self._avg_dicts(outputs)
+        self._log_dict(avg_outputs)
 
     def validation_step(self, batch, batch_idx):
         self.eval()
 
         model_output = self.forward(batch)
         target_smiles = batch["target_smiles"]
+        atom_tokens_org = batch["atom_tokens_org"]
 
         loss, token_mask_loss, attn_loss = self._calc_loss(batch, model_output)
         token_acc = self._calc_token_acc(batch, model_output)
@@ -135,19 +145,21 @@ class _AbsTransformerModel(pl.LightningModule):
 
         # mol_acc = torch.tensor(metrics["accuracy"], device=loss.device)
         # invalid = torch.tensor(metrics["invalid"], device=loss.device)
-        mol_strs = self.get_str(model_output)
+        mol_strs, mol_tokens = self.get_str(model_output)
 
         total = len(target_smiles)
         acc_str = 0
         for i in range(len(target_smiles)):
-            # flag = True
-            # for j in range(len(target_smiles[i])):
-            #     if mol_strs[i][j] != target_smiles[i][j]:
-            #         flag = False
-            # if flag:
-            #     acc_str += 1
-            if mol_strs[i] == target_smiles[i]:
+            # print("smiles len: " + str(len(mol_strs[i])) + " /  " + str(len(target_smiles[i])))
+            flag = True
+            for j in range(len(atom_tokens_org[i])):
+                if atom_tokens_org[i][j] != mol_tokens[i][j]:
+                    flag = False
+            if flag:
                 acc_str += 1
+            
+            # if mol_strs[i] == target_smiles[i]:
+            #     acc_str += 1
         acc_str = acc_str / total
 
         # Log for prog bar only
@@ -502,7 +514,7 @@ class BARTModel(_AbsTransformerModel):
         # text_embs = self.text_enc(encoder_embs.transpose(0, 1), mask=encoder_pad_mask)
         text_embs = self.encoder(encoder_embs, src_key_padding_mask=encoder_pad_mask)
         # node_embs, edge_embs = self.graph_enc(atom, edge, lengths=length, adj=adj)
-        memory, att_weight = self.graph_enc(atom, edge, lengths=length, adj=None, memory=text_embs,
+        memory, att_weight, reorder_attn = self.graph_enc(atom, edge, lengths=length, adj=None, memory=text_embs,
             tgt_mask=None,
             tgt_key_padding_mask=None,
             memory_key_padding_mask=encoder_pad_mask.clone())
@@ -534,6 +546,7 @@ class BARTModel(_AbsTransformerModel):
             # "model_output": model_output,
             "token_output": token_output,
             # "decoder_att_weight": decoder_att_weight
+            "reorder_attn": reorder_attn
         }
 
         return output
@@ -637,6 +650,8 @@ class BARTModel(_AbsTransformerModel):
         token_output = model_output["token_output"]
         pad_mask = batch_input["atom_tokens_pad_masks"]
         tokens = batch_input["atom_token_ids"]
+        reorder_attn = model_output["reorder_attn"]
+        atom_order = batch_input["atom_order"]
         # print("token_output", token_output.shape)
         # print("tokens", tokens.shape)
         # decoder_att_weight = model_output["decoder_att_weight"]
@@ -651,9 +666,20 @@ class BARTModel(_AbsTransformerModel):
         #     # print("decoder_att_weight", decoder_att_weight.shape)
         #     # print("cross_attn", cross_attn.shape)
         
-        # loss = token_mask_loss + attn_loss
-        attn_loss = torch.tensor(0.0, device=token_output.device)
+        if atom_order is not None:
+            attns = reorder_attn
+            attns_masked = attns.masked_fill(~atom_order.bool(),
+                                                   0.0)
+            attn_loss = self.loss_attn_fn(attns_masked, atom_order)
+            # print("decoder_att_weight", decoder_att_weight.shape)
+            # print("cross_attn", cross_attn.shape)
+
+        # loss = 0.0 * token_mask_loss + 1.0 * attn_loss
         loss = token_mask_loss
+        
+
+        # attn_loss = torch.tensor(0.0, device=token_output.device)
+        # loss = token_mask_loss
 
         # return token_mask_loss
         return loss, token_mask_loss, attn_loss
@@ -756,8 +782,9 @@ class BARTModel(_AbsTransformerModel):
         tokens = output_ids.transpose(0, 1).tolist()
         tokens = self.sampler.tokeniser.convert_ids_to_tokens(tokens)
         mol_strs = self.sampler.tokeniser.detokenise(tokens)
+        mol_tokens = self.sampler.tokeniser.detokens(tokens)
 
-        return mol_strs
+        return mol_strs, mol_tokens
 
 
 class UnifiedModel(_AbsTransformerModel):
