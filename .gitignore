@@ -15,3 +15,4 @@ train_*.log
 tb_logs/
 # models/
 GTA-Bert.iml
+.vscode/
