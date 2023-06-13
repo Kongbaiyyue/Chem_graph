@@ -25,6 +25,7 @@ BOND_STEREO = [Chem.rdchem.BondStereo.STEREOE,
 
 def get_graph_from_smiles(smi: str):
     mol = Chem.MolFromSmiles(smi)
+    # mol = Chem.MolFromSmiles(Chem.MolToSmiles(mol, canonical=True))
     if mol is None:
         print("smi:", smi, "mol:", mol)
     rxn_graph = RxnGraph(prod_mol=mol)

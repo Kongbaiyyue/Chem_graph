@@ -545,14 +545,24 @@ class BARTModel(_AbsTransformerModel):
             loss (singleton Tensor): Loss computed using cross-entropy,
         """
 
+        # seq_len, batch_size = tuple(target.size())
+
+        # token_pred = token_output.reshape((seq_len * batch_size, -1)).float()
+        # loss = self.loss_fn(token_pred, target.reshape(-1)).reshape((seq_len, batch_size))
+
+        # inv_target_mask = ~(target_mask > 0)
+        # num_tokens = inv_target_mask.sum()
+        # loss = loss.sum() / num_tokens
+        
         seq_len, batch_size = tuple(target.size())
 
         token_pred = token_output.reshape((seq_len * batch_size, -1)).float()
-        loss = self.loss_fn(token_pred, target.reshape(-1)).reshape((seq_len, batch_size))
 
+        loss = self.loss_fn(token_pred, target.reshape(-1))
         inv_target_mask = ~(target_mask > 0)
-        num_tokens = inv_target_mask.sum()
-        loss = loss.sum() / num_tokens
+        inv_target_mask = inv_target_mask.reshape(-1)
+        loss = loss * inv_target_mask
+        loss = loss.sum()
 
         return loss
 
@@ -902,14 +912,29 @@ class PromptModel(_AbsTransformerModel):
             loss (singleton Tensor): Loss computed using cross-entropy,
         """
 
+        # seq_len, batch_size = tuple(target.size())
+
+        # token_pred = token_output.reshape((seq_len * batch_size, -1)).float()
+        # loss = self.loss_fn(token_pred, target.reshape(-1)).reshape((seq_len, batch_size))
+
+        # inv_target_mask = ~(target_mask > 0)
+        # num_tokens = inv_target_mask.sum()
+        # loss = loss.sum() / num_tokens
+        
         seq_len, batch_size = tuple(target.size())
 
         token_pred = token_output.reshape((seq_len * batch_size, -1)).float()
-        loss = self.loss_fn(token_pred, target.reshape(-1)).reshape((seq_len, batch_size))
+        # loss = self.loss_fn(token_pred, target.reshape(-1)).reshape((seq_len, batch_size))
 
+        # inv_target_mask = ~(target_mask > 0)
+        # num_tokens = inv_target_mask.sum()
+        # loss = loss.sum() / num_tokens
+
+        loss = self.loss_fn(token_pred, target.reshape(-1))
         inv_target_mask = ~(target_mask > 0)
-        num_tokens = inv_target_mask.sum()
-        loss = loss.sum() / num_tokens
+        inv_target_mask = inv_target_mask.reshape(-1)
+        loss = loss * inv_target_mask
+        loss = loss.sum()
 
         return loss
 
