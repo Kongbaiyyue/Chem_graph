@@ -248,7 +248,7 @@ def build_trainer(args):
         callbacks.append(intra_epoch_checkpoint)
         check_val = 1
 
-    args.gpus = [1]
+    args.gpus = [0]
     print(f"Num gpus: {args.gpus}")
     print(f"Accelerator: {accelerator}")
 

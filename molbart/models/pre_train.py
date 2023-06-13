@@ -768,7 +768,8 @@ class PromptModel(_AbsTransformerModel):
         
         # text_embs = self.text_enc(encoder_embs.transpose(0, 1), mask=encoder_pad_mask)
         text_embs = self.encoder(encoder_embs, src_key_padding_mask=encoder_pad_mask)
-        node_embs, edge_embs = self.graph_enc(atom, edge, lengths=length, adj=adj)
+        # node_embs, edge_embs = self.graph_enc(atom, edge, lengths=length, adj=adj)
+        node_embs, edge_embs = self.graph_enc(atom, edge, lengths=length, adj=None)
         
         # memory = self.cross_enc(
         #     text_embs,
@@ -836,7 +837,7 @@ class PromptModel(_AbsTransformerModel):
         # ).transpose(0, 1)
 
         text_embs = self.encoder(encoder_embs, src_key_padding_mask=encoder_pad_mask)
-        node_embs, edge_embs = self.graph_enc(atom, edge, lengths=length, adj=adj)
+        node_embs, edge_embs = self.graph_enc(atom, edge, lengths=length, adj=None)
         
         model_output, att_weight = self.cross(
             text_embs,

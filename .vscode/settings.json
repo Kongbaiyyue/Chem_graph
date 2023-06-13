@@ -1,0 +1,9 @@
+{
+    "python.analysis.autoImportCompletions": true,
+    "python.autoComplete.extraPaths": [
+        "C:/Users/lenovo/.conda/envs/GTA/Lib/site-packages"
+    ],
+    "python.analysis.extraPaths": [
+        "C:/Users/lenovo/.conda/envs/GTA/Lib"
+    ]
+}

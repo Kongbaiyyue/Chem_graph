@@ -222,26 +222,37 @@ import torch
 # print(z)
 # print(torch.sum(z))
 
-from torch import nn, einsum
-from einops import rearrange, repeat
+# from torch import nn, einsum
+# from einops import rearrange, repeat
 
-# x = torch.randn(4, 2, 3)
-# # y = torch.randn(4, 2, 2, 3)
-# z = x.mean(dim=1)
+# # x = torch.randn(4, 2, 3)
+# # # y = torch.randn(4, 2, 2, 3)
+# # z = x.mean(dim=1)
 
-# # z = einsum('b i d, b i j d -> b i j', x, y)
+# # # z = einsum('b i d, b i j d -> b i j', x, y)
 
-# print(z)
-# print(x)
+# # print(z)
+# # print(x)
 
 
-import rdkit
-import rdkit.Chem as Chem
+# import rdkit
+# import rdkit.Chem as Chem
 
-# smi = "Cc1nc(OCCCCN2CCN(c3cccc4ccc(F)cc34)CC2)nc2c1cccn2C.O"
-# mol = Chem.MolFromSmiles(smi)
-# print(mol)
+# # smi = "Cc1nc(OCCCCN2CCN(c3cccc4ccc(F)cc34)CC2)nc2c1cccn2C.O"
+# # mol = Chem.MolFromSmiles(smi)
+# # print(mol)
 
-import pandas as pd
-df = pd.read_pickle("/public_data/oy/dataset/data/template/retro_uspto_50_template.pickle")
-df.to_csv("/public_data/oy/dataset/data/template/retro_uspto_50_template.csv")
+# import pandas as pd
+# df = pd.read_pickle("/public_data/oy/dataset/data/template/retro_uspto_50_template.pickle")
+# df.to_csv("/public_data/oy/dataset/data/template/retro_uspto_50_template.csv")
+
+lengths = torch.tensor([43, 12, 12])
+batch_size = lengths.numel()
+max_len = lengths.max()
+b = (torch.arange(0, max_len, device=lengths.device)
+        .type_as(lengths)
+        .repeat(batch_size, 1)
+        .lt(lengths.unsqueeze(1)))
+
+print(b)
+print(b.shape)
