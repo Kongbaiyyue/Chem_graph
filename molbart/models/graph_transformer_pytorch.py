@@ -98,13 +98,6 @@ class Attention(nn.Module):
     def forward(self, nodes, edges=None, mask=None, edge_mask=None, cross_kv=None):
         h = self.heads
 
-        if self.reorder_emb is not None:
-            outs, reorder_attn = self.reorder_emb(nodes, mask=mask)
-            nodes = nodes + outs
-            if edges is not None:
-                edges_outs = einsum('b k i, b i j d -> b k j d', reorder_attn, edges)
-                edges = edges + edges_outs
-
         q = self.to_q(nodes)
         if cross_kv is None:
             k, v = self.to_kv(nodes).chunk(2, dim = -1)
@@ -122,6 +115,15 @@ class Attention(nn.Module):
             freqs = rearrange(freqs, 'n d -> () n d')
             q = apply_rotary_emb(freqs, q)
             k = apply_rotary_emb(freqs, k)
+            
+        if self.reorder_emb is not None:
+            outs, reorder_attn = self.reorder_emb(nodes, mask=mask)
+            outs = rearrange(outs, 'b ... (h d) -> (b h) ... d', h = h)
+            q = q + outs
+            k = k + outs
+            # if edges is not None:
+            #     edges_outs = einsum('b k i, b i j d -> b k j d', reorder_attn, edges)
+                # edges = edges + edges_outs
 
         if exists(edge_mask):
             pass
@@ -131,6 +133,9 @@ class Attention(nn.Module):
             ek, ev = e_kv, e_kv
             k = k + ek
             v = v + ev
+            
+        # if self.reorder_emb is not None:
+        #     ek = ek + edges_outs
 
         if edges is not None:
             sim = einsum('b i d, b i j d -> b i j', q, k) * self.scale
@@ -306,13 +311,13 @@ class GraphCrossformer(nn.Module):
 
         for i in range(depth):
             self.layers.append(List([
-                # List([
-                #     PreNorm(h_dim, Attention(h_dim, pos_emb=pos_emb, edge_dim=edge_h_dim, dim_head=dim_head, heads=heads, reorder_emb=reorder_emb)),
-                #     # PreNorm(h_dim, attention[i]),
-                #     GatedResidual(h_dim)
-                # ]) if reorder else 
                 List([
-                    PreNorm(h_dim, Attention(h_dim, pos_emb=pos_emb, edge_dim=edge_h_dim, dim_head=dim_head, heads=heads, reorder_emb=None)),
+                    PreNorm(h_dim, Attention(h_dim, pos_emb=pos_emb, edge_dim=edge_h_dim, dim_head=dim_head, heads=heads, reorder_emb=reorder_emb)),
+                    # PreNorm(h_dim, attention[i]),
+                    GatedResidual(h_dim)
+                ]) if reorder else 
+                List([
+                    PreNorm(h_dim, Attention(h_dim, pos_emb=None, edge_dim=edge_h_dim, dim_head=dim_head, heads=heads, reorder_emb=None)),
                     # PreNorm(h_dim, attention[i]),
                     GatedResidual(h_dim)
                 ]),
@@ -346,14 +351,13 @@ class GraphCrossformer(nn.Module):
 
         for attn_block, ff_block, cross_block in self.layers:
             attn, attn_residual = attn_block
-            # if i == 0:
-            #     outs, edges, reorder_attn = attn(nodes, edges, mask=mask)
-            # else:
-            #     outs, edges = attn(nodes, edges, mask=mask)
-            reorder_attn = torch.tensor(0., device=nodes.device)
-            outs, edges = attn(nodes, edges, mask=mask)
+            if i == 0:
+                outs, edges, reorder_attn = attn(nodes, edges, mask=mask)
+            else:
+                outs, edges = attn(nodes, edges, mask=mask)
+            # reorder_attn = torch.tensor(0., device=nodes.device)
+            # outs, edges = attn(nodes, edges, mask=mask)
 
-            
             nodes = attn_residual(outs, nodes)
 
             if exists(ff_block):

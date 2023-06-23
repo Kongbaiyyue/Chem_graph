@@ -426,7 +426,3 @@ def mol_map_atom(smi1, smi2):
 # transformed_b = torch.matmul(a.unsqueeze(0), b.unsqueeze(3)).squeeze()
 
 # print(transformed_b)
-
-import molbart.util as util
-
-print(123)

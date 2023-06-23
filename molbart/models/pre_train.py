@@ -187,6 +187,7 @@ class _AbsTransformerModel(pl.LightningModule):
         model_output = self.forward(batch)
         target_smiles = batch["target_smiles"]
         source_smiles = batch["source_smiles"]
+        atom_tokens_org = batch["atom_tokens_org"]
 
         loss, token_mask_loss, attn_loss = self._calc_loss(batch, model_output)
         token_acc = self._calc_token_acc(batch, model_output)
@@ -195,14 +196,23 @@ class _AbsTransformerModel(pl.LightningModule):
         # metrics = self.sampler.calc_sampling_metrics(mol_strs, target_smiles)
 
 
-        mol_strs = self.get_str(model_output)
+        mol_strs, mol_tokens = self.get_str(model_output)
 
         with open("result.txt", "a") as f:
             for i in range(len(target_smiles)):
                 f.write("pred: " + mol_strs[i] + "\n")
                 f.write("targ: " + target_smiles[i] + "\n")
                 f.write("sour: " + source_smiles[i] + "\n")
-                if mol_strs[i] == target_smiles[i]:
+                flag = True
+                for j in range(len(atom_tokens_org[i])):
+                    if atom_tokens_org[i][j] != mol_tokens[i][j]:
+                        flag = False
+                
+                # if mol_strs[i] == target_smiles[i]:
+                #     f.write("True\n")
+                # else:
+                #     f.write("False\n")
+                if flag:
                     f.write("True\n")
                 else:
                     f.write("False\n")
@@ -674,8 +684,8 @@ class BARTModel(_AbsTransformerModel):
             # print("decoder_att_weight", decoder_att_weight.shape)
             # print("cross_attn", cross_attn.shape)
 
-        # loss = 0.0 * token_mask_loss + 1.0 * attn_loss
-        loss = token_mask_loss
+        loss = 1.0 * token_mask_loss + 1.0 * attn_loss
+        # loss = token_mask_loss
         
 
         # attn_loss = torch.tensor(0.0, device=token_output.device)
