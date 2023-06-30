@@ -1,3 +1,5 @@
+
+from numpy import int8
 import pandas as pd
 from pathlib import Path
 
@@ -19,17 +21,17 @@ def smi_tokenizer(smi):
 
 
 
-def extract_template(reaction):
-    try:
-        return extract_from_reaction(reaction)
-    except KeyboardInterrupt:
-        print('Interrupted')
-        raise KeyboardInterrupt
-    except Exception as e:
-        return {
-            'reaction_id': reaction['_id'],
-            'error': str(e)
-        }
+# def extract_template(reaction):
+#     try:
+#         return extract_from_reaction(reaction)
+#     except KeyboardInterrupt:
+#         print('Interrupted')
+#         raise KeyboardInterrupt
+#     except Exception as e:
+#         return {
+#             'reaction_id': reaction['_id'],
+#             'error': str(e)
+#         }
 
 # df = pd.read_csv("templates.csv")
 
@@ -302,6 +304,25 @@ def read_res():
     print("count_source_same", count_source_same)
 
 
+# def smi_tokens(smi):
+#     """
+#     Tokenize a SMILES molecule or reaction
+#     """
+#     import re
+
+#     # pattern = "(\[[^\]]+]|Br?|Cl?|N|O|S|P|F|I|b|c|n|o|s|p|\(|\)|\.|=|#|-|\+|\\\\|\/|:|~|@|\?|>|\*|\$|\%[0-9]{2}|[0-9])"
+#     # regex = re.compile(pattern)
+#     # tokens = [token for token in regex.findall(smi)]
+#     # assert smi == ''.join(tokens)
+#     # return tokens
+#     pattern = "(\[[^\]]+]|Bi|Br?|Ge|Te|Mo|K|Ti|Zr|Y|Na|125I|Al|Ce|Cr|Cl?|Ni?|O|S|Pd?|Fe?|I|b|c|Mn|n|o|s|<unk>|>>|Li|p|\(|\)|\.|=|#|-|\+|\\\\|\/|:|@|\?|>|\*|\$|\%[0-9]{2}|[0-9])"
+#     regex = re.compile(pattern)
+#     tokens = [token for token in regex.findall(smi)]
+#     if smi != ''.join(tokens):
+#         print('ERROR:', smi, ''.join(tokens))
+#     assert smi == ''.join(tokens)
+#     return tokens
+
 def smi_tokens(smi):
     """
     Tokenize a SMILES molecule or reaction
@@ -426,3 +447,63 @@ def mol_map_atom(smi1, smi2):
 # transformed_b = torch.matmul(a.unsqueeze(0), b.unsqueeze(3)).squeeze()
 
 # print(transformed_b)
+
+from molbart.data.smiles import get_graph_features_from_smi
+data_path = "../dataset/data/template/retro_uspto_50_template_md.pickle"
+
+path = Path(data_path)
+df = pd.read_pickle(path)
+
+products = df["products_mol"].tolist()
+reactants = df["products"].tolist()
+
+smi_p = products[0]
+smi_r = reactants[0]
+
+atom_feature, edge, adj = get_graph_features_from_smi(smi_r)
+
+def get_atom_token(smi):
+
+    not_atom_indices_src = []
+    atom_indices_src = []
+
+    smi_chars = smi_tokens(smi)
+    for j, cha in enumerate(smi_chars):
+        if (len(cha) == 1 and not cha.isalpha()) or (len(cha) > 1 and cha[0] not in ['[', 'B', 'C']):
+            not_atom_indices_src.append(j)
+        else:
+            atom_indices_src.append(cha)
+
+    return atom_indices_src
+
+def mol_map_atom(smi1, smi2):
+    from rdkit.Chem.rdFMCS import FindMCS
+
+    src_mol = Chem.MolFromSmiles(smi1)
+    tgt_mol = Chem.MolFromSmiles(smi2)
+
+    atom_map = torch.zeros(src_mol.GetNumAtoms(), tgt_mol.GetNumAtoms())
+    atom_index = torch.zeros(src_mol.GetNumAtoms(), dtype=torch.int8)
+
+    tgt_mol = Chem.MolFromSmiles(smi2)
+    mols = [src_mol, tgt_mol]
+    result = FindMCS(mols, timeout=10)
+    result_mol = Chem.MolFromSmarts(result.smartsString)
+    src_mat = src_mol.GetSubstructMatches(result_mol)
+    tgt_mat = tgt_mol.GetSubstructMatches(result_mol)
+    if len(src_mat) > 0 and len(tgt_mat) > 0:
+        for i, j in zip(src_mat[0], tgt_mat[0]):
+            # atom_map[i, j] = 1
+            atom_index[i] = j
+
+    atom_index = atom_index.tolist()
+    return atom_index
+
+atom_index = mol_map_atom(smi_p, smi_r)
+print(atom_index)
+
+node_p = get_atom_token(smi_p)
+node_r = get_atom_token(smi_r)
+
+print(node_p)
+print(node_r)

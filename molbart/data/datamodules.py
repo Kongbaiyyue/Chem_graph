@@ -445,7 +445,8 @@ class FineTuneReactionDataModule(_AbsDataModule):
             # smile2nodes.append(smile2node)
             # cross_attn.append(mol_map_diff_smiles(prods_smiles[i], reacts_smiles[i]))
             # cross_attn.append(mol_map_diff_smiles(reacts_smiles[i], prods_smiles[i]))
-            atom_order.append(mol_map_atom(prods_smiles[i], reacts_smiles[i]))
+            # atom_order.append(mol_map_atom(prods_smiles[i], reacts_smiles[i]))
+            atom_order.append(mol_map_atom(reacts_smiles[i], prods_smiles[i]))
         
         prods_adj = self.tokeniser._pad_adj(prods_adj, 0)
         prods_atom, atom_masks = self.tokeniser._pad_atom(atom_features, 0)

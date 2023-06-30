@@ -171,6 +171,7 @@ class Uspto50(ReactionDataset):
 
     def _prepare_strings(self, react, prod, type_token):
         # react_str = self._augment_to_smiles(react)
+        # react_str = prod
         # prod = Chem.MolFromSmiles(prod)
         # prod_str = self._augment_to_smiles(prod)
         # react_str = self._augment_to_smiles(prod)

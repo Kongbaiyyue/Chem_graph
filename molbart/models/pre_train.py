@@ -115,14 +115,15 @@ class _AbsTransformerModel(pl.LightningModule):
         token_acc = self._calc_token_acc(batch, model_output)
 
         self.log("train_loss", loss, on_step=True, logger=True, sync_dist=True)
-        self.log("train_token", token_acc, on_step=True, logger=True, sync_dist=True)
+        self.log("train_token", token_acc, prog_bar=True, logger=False, sync_dist=True)
         self.log("token_mask_loss", token_mask_loss, prog_bar=True, logger=False, sync_dist=True)
         self.log("attn_loss", attn_loss, prog_bar=True, logger=False, sync_dist=True)
 
         train_loss = {
             "loss" : loss,
             "token_mask_loss" : token_mask_loss,
-            "attn_loss": attn_loss
+            "attn_loss": attn_loss,
+            "train_token": token_acc
         }
         return train_loss
     
@@ -152,6 +153,7 @@ class _AbsTransformerModel(pl.LightningModule):
         for i in range(len(target_smiles)):
             # print("smiles len: " + str(len(mol_strs[i])) + " /  " + str(len(target_smiles[i])))
             flag = True
+            # print(len(atom_tokens_org[i]), len(mol_tokens[i]))
             for j in range(len(atom_tokens_org[i])):
                 if atom_tokens_org[i][j] != mol_tokens[i][j]:
                     flag = False
@@ -247,6 +249,7 @@ class _AbsTransformerModel(pl.LightningModule):
     def configure_optimizers(self):
         params = self.parameters()
         optim = torch.optim.Adam(params, lr=self.lr, weight_decay=self.weight_decay, betas=(0.9, 0.999))
+        # optim = torch.optim.SGD(params=params, lr=self.lr, momentum=0.9)
 
         if self.schedule == "const":
             print("Using constant LR schedule.")
@@ -432,9 +435,9 @@ class BARTModel(_AbsTransformerModel):
         self.encoder = nn.TransformerEncoder(enc_layer, num_layers // 2, norm=enc_norm)
         assert d_model % num_heads == 0
         dim_head = d_model // num_heads
-        attention = []
-        for _ in range(3):
-            attention.append(Attention(d_model, pos_emb=None, edge_dim=d_model, dim_head=dim_head, heads=num_heads))
+        # attention = []
+        # for _ in range(3):
+        #     attention.append(Attention(d_model, pos_emb=None, edge_dim=d_model, dim_head=dim_head, heads=num_heads))
         
         # self.graph_enc = GraphTransformer( 
         #     input_dim=9,
@@ -453,7 +456,7 @@ class BARTModel(_AbsTransformerModel):
         self.graph_enc = GraphCrossformer(
             input_dim=9,
             h_dim=d_model,
-            depth=3,
+            depth=4,
             corss_d_feedforward=d_feedforward,
             cross_dropout=dropout,
             cross_activation=activation,
@@ -463,7 +466,8 @@ class BARTModel(_AbsTransformerModel):
             with_feedforwards=True,
             # whether to add a feedforward after each attention layer, suggested by literature to be needed
             gated_residual=True,  # to use the gated residual to prevent over-smoothing
-            rel_pos_emb=True
+            # rel_pos_emb=True
+            rel_pos_emb=False
         )
         
         # cross_norm = nn.LayerNorm(d_model)
@@ -684,8 +688,10 @@ class BARTModel(_AbsTransformerModel):
             # print("decoder_att_weight", decoder_att_weight.shape)
             # print("cross_attn", cross_attn.shape)
 
-        loss = 1.0 * token_mask_loss + 1.0 * attn_loss
+        loss = 1.0 * token_mask_loss + 0.1 * attn_loss
         # loss = token_mask_loss
+        # token_mask_loss = torch.tensor(0., device=attn_loss.device)
+        # loss = attn_loss
         
 
         # attn_loss = torch.tensor(0.0, device=token_output.device)

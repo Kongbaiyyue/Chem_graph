@@ -4,7 +4,7 @@ from einops import rearrange, repeat
 
 from rotary_embedding_torch import RotaryEmbedding, apply_rotary_emb
 
-from molbart.models.util import PreNormDecoderLayer
+from molbart.models.util import PreNormDecoderLayer, PreNormCrossLayer
 
 
 def sequence_mask(lengths, max_len=None):
@@ -97,6 +97,14 @@ class Attention(nn.Module):
 
     def forward(self, nodes, edges=None, mask=None, edge_mask=None, cross_kv=None):
         h = self.heads
+        
+        if self.reorder_emb is not None:
+            # nodes, reorder_attn = self.reorder_emb(nodes, mask=mask)
+            nodes_res, reorder_attn = self.reorder_emb(nodes, mask=mask)
+            nodes = nodes + nodes_res
+            # if edges is not None:
+            #     edges_outs = einsum('b k i, b i j d -> b k j d', reorder_attn, edges)
+                # edges = edges + edges_outs
 
         q = self.to_q(nodes)
         if cross_kv is None:
@@ -116,14 +124,14 @@ class Attention(nn.Module):
             q = apply_rotary_emb(freqs, q)
             k = apply_rotary_emb(freqs, k)
             
-        if self.reorder_emb is not None:
-            outs, reorder_attn = self.reorder_emb(nodes, mask=mask)
-            outs = rearrange(outs, 'b ... (h d) -> (b h) ... d', h = h)
-            q = q + outs
-            k = k + outs
-            # if edges is not None:
-            #     edges_outs = einsum('b k i, b i j d -> b k j d', reorder_attn, edges)
-                # edges = edges + edges_outs
+        # if self.reorder_emb is not None:
+        #     outs, reorder_attn = self.reorder_emb(nodes, mask=mask)
+        #     outs = rearrange(outs, 'b ... (h d) -> (b h) ... d', h = h)
+        #     q = q + outs
+        #     k = k + outs
+        #     # if edges is not None:
+        #     #     edges_outs = einsum('b k i, b i j d -> b k j d', reorder_attn, edges)
+        #         # edges = edges + edges_outs
 
         if exists(edge_mask):
             pass
@@ -143,11 +151,11 @@ class Attention(nn.Module):
             sim = einsum('b i d, b j d -> b i j', q, k) * self.scale
 
         if exists(mask):
-            # mask = rearrange(mask, 'b i -> b i ()') & rearrange(mask, 'b j -> b () j')
+            mask = rearrange(mask, 'b i -> b i ()') & rearrange(mask, 'b j -> b () j')
             if edges is not None:
                 mask = repeat(mask, 'b i j -> (b h) i j', h=h)
             else:
-                mask = rearrange(mask, 'b d -> b () d')
+                # mask = rearrange(mask, 'b d -> b () d')
                 mask = repeat(mask, 'b i j -> (b h) i j', h=h)   # 为什么要repeat？
             max_neg_value = -torch.finfo(sim.dtype).max
             sim.masked_fill_(~mask, max_neg_value)
@@ -326,7 +334,8 @@ class GraphCrossformer(nn.Module):
                     GatedResidual(h_dim)
                 ]) if with_feedforwards else None,
                 List([
-                    PreNormDecoderLayer(h_dim, heads, corss_d_feedforward, cross_dropout, cross_activation),
+                    # PreNormDecoderLayer(h_dim, heads, corss_d_feedforward, cross_dropout, cross_activation),
+                    PreNormCrossLayer(h_dim, heads, corss_d_feedforward, cross_dropout, cross_activation),
                     nn.LayerNorm(h_dim)
                 ]),
             ]))
@@ -336,16 +345,18 @@ class GraphCrossformer(nn.Module):
     def forward(self, nodes, edges=None, lengths=None, adj=None, memory=None, tgt_mask=None,
                 memory_mask=None, tgt_key_padding_mask=None, memory_key_padding_mask=None):
         nodes = self.n_emb(nodes)
+        # edges = None
         if edges is not None:
             edges = self.e_emb(edges)
             edges = self.norm_edges(edges)
 
-        mask = None
+        # mask = None
         if isinstance(adj, torch.Tensor):
             mask = sequence_mask(lengths).unsqueeze(1) + ~adj.bool()
             # mask = ~sequence_mask(lengths).unsqueeze(1)
         elif adj is None:
-            mask = sequence_mask(lengths).unsqueeze(1)
+            # mask = sequence_mask(lengths).unsqueeze(1)
+            mask = sequence_mask(lengths)
 
         i = 0
 
@@ -364,21 +375,25 @@ class GraphCrossformer(nn.Module):
                 ff, ff_residual = ff_block
                 nodes = ff_residual(ff(nodes), nodes)
             
-            output = nodes.transpose(1, 0)
+            # output = nodes.transpose(1, 0)
 
-            mod, cross_norm = cross_block
+            # mod, cross_norm = cross_block
             
-            output, att_weight = mod(output, memory, tgt_mask=tgt_mask,
-                memory_mask=memory_mask,
-                tgt_key_padding_mask=tgt_key_padding_mask,
-                memory_key_padding_mask=memory_key_padding_mask)            
+            # output, att_weight = mod(output, memory, tgt_mask=tgt_mask,
+            #     memory_mask=memory_mask,
+            #     tgt_key_padding_mask=tgt_key_padding_mask,
+            #     memory_key_padding_mask=memory_key_padding_mask)            
 
-            if cross_norm is not None:
-                output = cross_norm(output)
+            # if cross_norm is not None:
+            #     output = cross_norm(output)
+            
+            # nodes = output.transpose(1, 0)
+            
             
             i += 1
-
-        return output, att_weight, reorder_attn
+            
+        att_weight = torch.tensor(0., device=nodes.device)
+        return nodes.transpose(1, 0), att_weight, reorder_attn
 
 
 class ReorderEmbedding(nn.Module):
@@ -408,21 +423,24 @@ class ReorderEmbedding(nn.Module):
         else:
             k, v = self.to_kv(cross_kv).chunk(2, dim = -1)
 
-        q, k, v = map(lambda t: rearrange(t, 'b ... (h d) -> (b h) ... d', h = h), (q, k, v))
+        # q, k, v = map(lambda t: rearrange(t, 'b ... (h d) -> (b h) ... d', h = h), (q, k, v))
+        
         
         sim = einsum('b i d, b j d -> b i j', q, k) * self.scale
 
         if exists(mask):
             # mask = rearrange(mask, 'b d -> b () d')
-            mask = repeat(mask, 'b i j -> (b h) i j', h=h)   # 为什么要repeat？
+            mask = rearrange(mask, 'b i -> b i ()') & rearrange(mask, 'b j -> b () j')
+            # mask = repeat(mask, 'b i j -> (b h) i j', h=h)   # 为什么要repeat？
             max_neg_value = -torch.finfo(sim.dtype).max
             sim.masked_fill_(~mask, max_neg_value)
 
         attn = sim.softmax(dim=-1)
         out = einsum('b i j, b j d -> b i d', attn, v)
-        out = rearrange(out, '(b h) n d -> b n (h d)', h=h)
+        # out = rearrange(out, '(b h) n d -> b n (h d)', h=h)
 
-        return self.to_out(out), rearrange(attn, '(b h) i j -> b h i j', h=h).mean(dim=1)
+        # return self.to_out(out), rearrange(attn, '(b h) i j -> b h i j', h=h).mean(dim=1)
+        return self.to_out(out), attn
 
 
 if __name__ == '__main__':
