@@ -315,17 +315,17 @@ class GraphCrossformer(nn.Module):
         dim_head = h_dim // heads
 
         pos_emb = RotaryEmbedding(dim_head) if rel_pos_emb else None
-        reorder_emb = ReorderEmbedding(h_dim, dim_head, heads) if reorder else None
+        self.reorder_emb = ReorderEmbedding(h_dim, dim_head, heads) if reorder else None
 
         for i in range(depth):
             self.layers.append(List([
+                # List([
+                #     PreNorm(h_dim, Attention(h_dim, pos_emb=pos_emb, edge_dim=edge_h_dim, dim_head=dim_head, heads=heads, reorder_emb=reorder_emb)),
+                #     # PreNorm(h_dim, attention[i]),
+                #     GatedResidual(h_dim)
+                # ]) if reorder else 
                 List([
-                    PreNorm(h_dim, Attention(h_dim, pos_emb=pos_emb, edge_dim=edge_h_dim, dim_head=dim_head, heads=heads, reorder_emb=reorder_emb)),
-                    # PreNorm(h_dim, attention[i]),
-                    GatedResidual(h_dim)
-                ]) if reorder else 
-                List([
-                    PreNorm(h_dim, Attention(h_dim, pos_emb=None, edge_dim=edge_h_dim, dim_head=dim_head, heads=heads, reorder_emb=None)),
+                    PreNorm(h_dim, Attention(h_dim, pos_emb=pos_emb, edge_dim=edge_h_dim, dim_head=dim_head, heads=heads, reorder_emb=None)),
                     # PreNorm(h_dim, attention[i]),
                     GatedResidual(h_dim)
                 ]),
@@ -358,14 +358,17 @@ class GraphCrossformer(nn.Module):
             # mask = sequence_mask(lengths).unsqueeze(1)
             mask = sequence_mask(lengths)
 
+        
+        nodes, reorder_attn = self.reorder_emb(nodes, mask=mask)
+        
         i = 0
 
         for attn_block, ff_block, cross_block in self.layers:
             attn, attn_residual = attn_block
-            if i == 0:
-                outs, edges, reorder_attn = attn(nodes, edges, mask=mask)
-            else:
-                outs, edges = attn(nodes, edges, mask=mask)
+            # if i == 0:
+            #     outs, edges, reorder_attn = attn(nodes, edges, mask=mask)
+            # else:
+            outs, edges = attn(nodes, edges, mask=mask)
             # reorder_attn = torch.tensor(0., device=nodes.device)
             # outs, edges = attn(nodes, edges, mask=mask)
 
@@ -436,7 +439,9 @@ class ReorderEmbedding(nn.Module):
             sim.masked_fill_(~mask, max_neg_value)
 
         attn = sim.softmax(dim=-1)
-        out = einsum('b i j, b j d -> b i d', attn, v)
+        # out = einsum('b i j, b j d -> b i d', attn, v)
+        out = einsum('b i j, b j d -> b i d', attn, nodes)
+        
         # out = rearrange(out, '(b h) n d -> b n (h d)', h=h)
 
         # return self.to_out(out), rearrange(attn, '(b h) i j -> b h i j', h=h).mean(dim=1)

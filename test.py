@@ -460,7 +460,7 @@ reactants = df["products"].tolist()
 smi_p = products[0]
 smi_r = reactants[0]
 
-atom_feature, edge, adj = get_graph_features_from_smi(smi_r)
+# atom_feature, edge, adj = get_graph_features_from_smi(smi_r)
 
 def get_atom_token(smi):
 
@@ -502,8 +502,8 @@ def mol_map_atom(smi1, smi2):
 atom_index = mol_map_atom(smi_p, smi_r)
 print(atom_index)
 
-node_p = get_atom_token(smi_p)
-node_r = get_atom_token(smi_r)
+# node_p = get_atom_token(smi_p)
+# node_r = get_atom_token(smi_r)
 
-print(node_p)
-print(node_r)
+# print(node_p)
+# print(node_r)
